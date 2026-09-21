@@ -52,7 +52,7 @@ class EditRoomViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(isLoading = true, error = null)
         viewModelScope.launch {
             val room = repository.getRoom(roomNumber)
-            val tenants = repository.getTenantsInRoom(roomNumber)
+            val tenants = repository.getTenantsInRoom(roomNumber).filter { !it.deleted && it.roomNumber.isNotBlank() }
             if (room != null) {
                 _uiState.value = EditRoomUiState(
                     roomNumber = room.roomNumber,

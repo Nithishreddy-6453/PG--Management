@@ -227,6 +227,8 @@ class SyncEngine @Inject constructor(
                     for (dto in tenants) {
                         tenantDao.insertTenant(
                             dto.toEntity().copy(
+                                id = 0,
+                                cloudId = dto.cloudId.ifBlank { dto.id },
                                 ownerId = ownerId,
                                 syncStatus = "SYNCED",
                                 version = dto.version,
@@ -248,6 +250,8 @@ class SyncEngine @Inject constructor(
                     for (dto in payments) {
                         rentPaymentDao.insertPayment(
                             dto.toEntity().copy(
+                                id = 0,
+                                cloudId = dto.cloudId.ifBlank { dto.id },
                                 ownerId = ownerId,
                                 syncStatus = "SYNCED",
                                 version = dto.version,
@@ -269,6 +273,8 @@ class SyncEngine @Inject constructor(
                     for (dto in expenses) {
                         expenseDao.insertExpense(
                             dto.toEntity().copy(
+                                id = 0,
+                                cloudId = dto.cloudId.ifBlank { dto.id },
                                 ownerId = ownerId,
                                 syncStatus = "SYNCED",
                                 version = dto.version,
@@ -389,12 +395,16 @@ class SyncEngine @Inject constructor(
                     else -> logger.w(TAG, "Unknown entity type in sync queue: ${op.entityType}")
                 }
             } catch (e: Exception) {
-                logger.e(TAG, "Failed uploading operation ${op.id} (${op.entityType}): ${e.message}", e)
+                val realCause = e.cause ?: e
+                val exceptionClass = realCause.javaClass.name
+                val errorMsg = e.message ?: e.localizedMessage ?: "Upload failed"
+                val detailedError = "[$exceptionClass] $errorMsg"
+                logger.e(TAG, "Failed uploading operation ${op.id} (${op.entityType}): $detailedError", e)
                 syncQueueDao.update(
                     op.copy(
                         status = "FAILED",
                         retryCount = op.retryCount + 1,
-                        error = e.localizedMessage ?: "Upload failed",
+                        error = detailedError,
                         lastAttemptAt = System.currentTimeMillis()
                     )
                 )
@@ -410,6 +420,8 @@ class SyncEngine @Inject constructor(
         }
 
         val myDeviceId = deviceIdentityManager.getDeviceId()
+        val docId = room.roomNumber
+        val firestorePath = "rooms/$docId"
         if (op.operationType == "DELETE" || room.deleted) {
             when (val res = firestoreRoomRepository.deleteRoom(room.roomNumber, myDeviceId)) {
                 is PgResult.Success -> {
@@ -424,7 +436,7 @@ class SyncEngine @Inject constructor(
                     syncQueueDao.deleteOperation(op.id)
                     syncQueueDao.deleteByEntity("ROOM", room.roomNumber)
                 }
-                is PgResult.Failure -> throw Exception(res.error.message)
+                is PgResult.Failure -> throw Exception("[Firestore path: $firestorePath] ${res.error.message}")
             }
         } else {
             val nextVersion = room.version + 1
@@ -449,7 +461,7 @@ class SyncEngine @Inject constructor(
                     syncQueueDao.deleteOperation(op.id)
                     syncQueueDao.deleteByEntity("ROOM", room.roomNumber)
                 }
-                is PgResult.Failure -> throw Exception(res.error.message)
+                is PgResult.Failure -> throw Exception("[Firestore path: $firestorePath] ${res.error.message}")
             }
         }
     }
@@ -463,7 +475,8 @@ class SyncEngine @Inject constructor(
         }
 
         val myDeviceId = deviceIdentityManager.getDeviceId()
-        val docId = "tenant_$localId"
+        val docId = tenant.cloudId.ifBlank { "tenant_$localId" }
+        val firestorePath = "tenants/$docId"
         if (op.operationType == "DELETE" || tenant.deleted) {
             when (val res = firestoreTenantRepository.deleteTenant(docId, myDeviceId)) {
                 is PgResult.Success -> {
@@ -478,13 +491,14 @@ class SyncEngine @Inject constructor(
                     syncQueueDao.deleteOperation(op.id)
                     syncQueueDao.deleteByEntity("TENANT", localId.toString())
                 }
-                is PgResult.Failure -> throw Exception(res.error.message)
+                is PgResult.Failure -> throw Exception("[Firestore path: $firestorePath] ${res.error.message}")
             }
         } else {
             val nextVersion = tenant.version + 1
             val now = System.currentTimeMillis()
             val dto = tenant.toDto(ownerId, myDeviceId).copy(
                 id = docId,
+                cloudId = docId,
                 updatedAt = now,
                 version = nextVersion,
                 lastModifiedByDeviceId = myDeviceId
@@ -493,6 +507,7 @@ class SyncEngine @Inject constructor(
                 is PgResult.Success -> {
                     tenantDao.updateTenant(
                         tenant.copy(
+                            cloudId = docId,
                             syncStatus = "SYNCED",
                             ownerId = ownerId,
                             version = nextVersion,
@@ -504,7 +519,7 @@ class SyncEngine @Inject constructor(
                     syncQueueDao.deleteOperation(op.id)
                     syncQueueDao.deleteByEntity("TENANT", localId.toString())
                 }
-                is PgResult.Failure -> throw Exception(res.error.message)
+                is PgResult.Failure -> throw Exception("[Firestore path: $firestorePath] ${res.error.message}")
             }
         }
     }
@@ -518,7 +533,8 @@ class SyncEngine @Inject constructor(
         }
 
         val myDeviceId = deviceIdentityManager.getDeviceId()
-        val docId = "payment_$localId"
+        val docId = payment.cloudId.ifBlank { "payment_$localId" }
+        val firestorePath = "payments/$docId"
         if (op.operationType == "DELETE" || payment.deleted) {
             when (val res = firestorePaymentRepository.deletePayment(docId, myDeviceId)) {
                 is PgResult.Success -> {
@@ -533,13 +549,14 @@ class SyncEngine @Inject constructor(
                     syncQueueDao.deleteOperation(op.id)
                     syncQueueDao.deleteByEntity("PAYMENT", localId.toString())
                 }
-                is PgResult.Failure -> throw Exception(res.error.message)
+                is PgResult.Failure -> throw Exception("[Firestore path: $firestorePath] ${res.error.message}")
             }
         } else {
             val nextVersion = payment.version + 1
             val now = System.currentTimeMillis()
             val dto = payment.toDto(ownerId, myDeviceId).copy(
                 id = docId,
+                cloudId = docId,
                 updatedAt = now,
                 version = nextVersion,
                 lastModifiedByDeviceId = myDeviceId
@@ -548,6 +565,7 @@ class SyncEngine @Inject constructor(
                 is PgResult.Success -> {
                     rentPaymentDao.updatePayment(
                         payment.copy(
+                            cloudId = docId,
                             syncStatus = "SYNCED",
                             ownerId = ownerId,
                             version = nextVersion,
@@ -559,7 +577,7 @@ class SyncEngine @Inject constructor(
                     syncQueueDao.deleteOperation(op.id)
                     syncQueueDao.deleteByEntity("PAYMENT", localId.toString())
                 }
-                is PgResult.Failure -> throw Exception(res.error.message)
+                is PgResult.Failure -> throw Exception("[Firestore path: $firestorePath] ${res.error.message}")
             }
         }
     }
@@ -573,7 +591,8 @@ class SyncEngine @Inject constructor(
         }
 
         val myDeviceId = deviceIdentityManager.getDeviceId()
-        val docId = "expense_$localId"
+        val docId = expense.cloudId.ifBlank { "expense_$localId" }
+        val firestorePath = "expenses/$docId"
         if (op.operationType == "DELETE" || expense.deleted) {
             when (val res = firestoreExpenseRepository.deleteExpense(docId, myDeviceId)) {
                 is PgResult.Success -> {
@@ -588,13 +607,14 @@ class SyncEngine @Inject constructor(
                     syncQueueDao.deleteOperation(op.id)
                     syncQueueDao.deleteByEntity("EXPENSE", localId.toString())
                 }
-                is PgResult.Failure -> throw Exception(res.error.message)
+                is PgResult.Failure -> throw Exception("[Firestore path: $firestorePath] ${res.error.message}")
             }
         } else {
             val nextVersion = expense.version + 1
             val now = System.currentTimeMillis()
             val dto = expense.toDto(ownerId, myDeviceId).copy(
                 id = docId,
+                cloudId = docId,
                 updatedAt = now,
                 version = nextVersion,
                 lastModifiedByDeviceId = myDeviceId
@@ -603,6 +623,7 @@ class SyncEngine @Inject constructor(
                 is PgResult.Success -> {
                     expenseDao.updateExpense(
                         expense.copy(
+                            cloudId = docId,
                             syncStatus = "SYNCED",
                             ownerId = ownerId,
                             version = nextVersion,
@@ -614,7 +635,7 @@ class SyncEngine @Inject constructor(
                     syncQueueDao.deleteOperation(op.id)
                     syncQueueDao.deleteByEntity("EXPENSE", localId.toString())
                 }
-                is PgResult.Failure -> throw Exception(res.error.message)
+                is PgResult.Failure -> throw Exception("[Firestore path: $firestorePath] ${res.error.message}")
             }
         }
     }
@@ -627,6 +648,7 @@ class SyncEngine @Inject constructor(
         }
 
         val myDeviceId = deviceIdentityManager.getDeviceId()
+        val firestorePath = "properties/${property.propertyId}"
         if (op.operationType == "DELETE" || property.deleted) {
             when (val res = firestorePropertyRepository.deleteProperty(property.propertyId, myDeviceId)) {
                 is PgResult.Success -> {
@@ -641,7 +663,7 @@ class SyncEngine @Inject constructor(
                     syncQueueDao.deleteOperation(op.id)
                     syncQueueDao.deleteByEntity("PROPERTY", property.propertyId)
                 }
-                is PgResult.Failure -> throw Exception(res.error.message)
+                is PgResult.Failure -> throw Exception("[Firestore path: $firestorePath] ${res.error.message}")
             }
         } else {
             val nextVersion = property.version + 1
@@ -666,7 +688,7 @@ class SyncEngine @Inject constructor(
                     syncQueueDao.deleteOperation(op.id)
                     syncQueueDao.deleteByEntity("PROPERTY", property.propertyId)
                 }
-                is PgResult.Failure -> throw Exception(res.error.message)
+                is PgResult.Failure -> throw Exception("[Firestore path: $firestorePath] ${res.error.message}")
             }
         }
     }
@@ -683,6 +705,7 @@ class SyncEngine @Inject constructor(
         val dto = profile.toPropertyDto(ownerId).copy(
             updatedAt = now
         )
+        val firestorePath = "properties/${dto.id}"
         when (val res = firestorePropertyRepository.saveProperty(dto)) {
             is PgResult.Success -> {
                 ownerProfileDao.insertProfile(
@@ -696,7 +719,7 @@ class SyncEngine @Inject constructor(
                 )
                 syncQueueDao.deleteOperation(op.id)
             }
-            is PgResult.Failure -> throw Exception(res.error.message)
+            is PgResult.Failure -> throw Exception("[Firestore path: $firestorePath] ${res.error.message}")
         }
     }
 
@@ -1019,10 +1042,15 @@ class SyncEngine @Inject constructor(
         database.withTransaction {
             for (remoteDto in tenants) {
                 if (remoteDto.ownerId != ownerId) continue
-                val local = tenantDao.getTenantByIdIncludingDeleted(remoteDto.localId)
+                val cloudId = remoteDto.cloudId.ifBlank { remoteDto.id }
+                val local = if (cloudId.isNotBlank()) tenantDao.getTenantByCloudIdIncludingDeleted(cloudId)
+                    else if (remoteDto.localId > 0) tenantDao.getTenantByIdIncludingDeleted(remoteDto.localId)
+                    else null
                 if (local == null) {
                     tenantDao.insertTenant(
                         remoteDto.toEntity().copy(
+                            id = 0,
+                            cloudId = cloudId,
                             ownerId = ownerId,
                             syncStatus = "SYNCED",
                             version = remoteDto.version,
@@ -1063,6 +1091,8 @@ class SyncEngine @Inject constructor(
                     is ConflictResult.UseRemote -> {
                         tenantDao.updateTenant(
                             remoteDto.toEntity().copy(
+                                id = local.id,
+                                cloudId = local.cloudId.ifBlank { cloudId },
                                 ownerId = ownerId,
                                 syncStatus = "SYNCED",
                                 version = remoteDto.version,
@@ -1119,10 +1149,20 @@ class SyncEngine @Inject constructor(
         database.withTransaction {
             for (remoteDto in payments) {
                 if (remoteDto.ownerId != ownerId) continue
-                val local = rentPaymentDao.getPaymentByIdIncludingDeleted(remoteDto.localId)
+                val cloudId = remoteDto.cloudId.ifBlank { remoteDto.id }
+                val local = (if (cloudId.isNotBlank()) rentPaymentDao.getPaymentByCloudIdIncludingDeleted(cloudId)
+                    else if (remoteDto.localId > 0) rentPaymentDao.getPaymentByIdIncludingDeleted(remoteDto.localId)
+                    else null) ?: if (remoteDto.tenantId > 0 && remoteDto.billingMonth.isNotBlank()) {
+                        rentPaymentDao.getPaymentForTenantPropertyAndMonth(remoteDto.tenantId, remoteDto.propertyId, remoteDto.billingMonth)
+                            ?: rentPaymentDao.getPaymentForTenantAndMonth(remoteDto.tenantId, remoteDto.billingMonth)
+                    } else if (remoteDto.tenantName.isNotBlank() && remoteDto.billingMonth.isNotBlank()) {
+                        rentPaymentDao.getPaymentForTenantNamePropertyAndMonth(remoteDto.tenantName, remoteDto.propertyId, remoteDto.billingMonth)
+                    } else null
                 if (local == null) {
                     rentPaymentDao.insertPayment(
                         remoteDto.toEntity().copy(
+                            id = 0,
+                            cloudId = cloudId,
                             ownerId = ownerId,
                             syncStatus = "SYNCED",
                             version = remoteDto.version,
@@ -1163,6 +1203,8 @@ class SyncEngine @Inject constructor(
                     is ConflictResult.UseRemote -> {
                         rentPaymentDao.updatePayment(
                             remoteDto.toEntity().copy(
+                                id = local.id,
+                                cloudId = local.cloudId.ifBlank { cloudId },
                                 ownerId = ownerId,
                                 syncStatus = "SYNCED",
                                 version = remoteDto.version,
@@ -1219,10 +1261,15 @@ class SyncEngine @Inject constructor(
         database.withTransaction {
             for (remoteDto in expenses) {
                 if (remoteDto.ownerId != ownerId) continue
-                val local = expenseDao.getExpenseByIdIncludingDeleted(remoteDto.localId)
+                val cloudId = remoteDto.cloudId.ifBlank { remoteDto.id }
+                val local = if (cloudId.isNotBlank()) expenseDao.getExpenseByCloudIdIncludingDeleted(cloudId)
+                    else if (remoteDto.localId > 0) expenseDao.getExpenseByIdIncludingDeleted(remoteDto.localId)
+                    else null
                 if (local == null) {
                     expenseDao.insertExpense(
                         remoteDto.toEntity().copy(
+                            id = 0,
+                            cloudId = cloudId,
                             ownerId = ownerId,
                             syncStatus = "SYNCED",
                             version = remoteDto.version,
@@ -1263,6 +1310,8 @@ class SyncEngine @Inject constructor(
                     is ConflictResult.UseRemote -> {
                         expenseDao.updateExpense(
                             remoteDto.toEntity().copy(
+                                id = local.id,
+                                cloudId = local.cloudId.ifBlank { cloudId },
                                 ownerId = ownerId,
                                 syncStatus = "SYNCED",
                                 version = remoteDto.version,

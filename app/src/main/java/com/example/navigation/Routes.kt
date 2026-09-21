@@ -61,6 +61,8 @@ sealed class Screen(val route: String) {
     object BackupSettings : Screen("settings_backup")
     object SyncSettings : Screen("settings_sync")
     object AboutSettings : Screen("settings_about")
+    object ExcelExport : Screen("excel_export")
+    object ExcelImport : Screen("excel_import")
 
     companion object {
         const val KEY_ROOM_ID = "roomId"

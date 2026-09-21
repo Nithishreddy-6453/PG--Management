@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.core.designsystem.LocalSpacing
 import com.example.data.database.ConflictRecordEntity
+import com.example.data.database.SyncOperationEntity
 import com.example.data.sync.ConflictResolutionStrategy
 import com.example.features.settings.ui.viewmodel.SyncViewModel
 import java.text.SimpleDateFormat
@@ -37,6 +38,7 @@ fun SyncSettingsScreen(
     val spacing = LocalSpacing.current
     val diagnostics by viewModel.diagnostics.collectAsState()
     val conflicts by viewModel.conflicts.collectAsState()
+    val syncOperations by viewModel.syncOperations.collectAsState()
     val actionMessage by viewModel.actionMessage.collectAsState()
     val clipboardManager = LocalClipboardManager.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -228,7 +230,65 @@ fun SyncSettingsScreen(
                 }
             }
 
-            // 3. Active Conflicts Section
+            // 3. Sync Operations Diagnostics (Failed & Pending Queue)
+            item {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.BugReport,
+                        contentDescription = null,
+                        tint = if (diagnostics.failedCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(spacing.small))
+                    Text(
+                        text = "Sync Operations Diagnostic (${syncOperations.size})",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (diagnostics.failedCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onBackground
+                    )
+                }
+            }
+
+            if (syncOperations.isEmpty()) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth().testTag("empty_sync_queue_card"),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(spacing.medium),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = Color(0xFF2E7D32),
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(spacing.medium))
+                            Text(
+                                text = "Sync queue is empty. No operations pending or failed.",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                }
+            } else {
+                items(syncOperations, key = { it.id }) { op ->
+                    SyncOperationDiagnosticCard(
+                        operation = op,
+                        dateFormat = dateFormat,
+                        onCopy = { text ->
+                            clipboardManager.setText(AnnotatedString(text))
+                        }
+                    )
+                }
+            }
+
+            // 4. Active Conflicts Section
             item {
                 Text(
                     text = "Conflict Resolution (${conflicts.size})",
@@ -416,5 +476,157 @@ fun ConflictCard(
                 }
             }
         }
+    }
+}
+
+@Composable
+fun SyncOperationDiagnosticCard(
+    operation: SyncOperationEntity,
+    dateFormat: SimpleDateFormat,
+    onCopy: (String) -> Unit
+) {
+    val spacing = LocalSpacing.current
+    val firestoreCollection = when (operation.entityType) {
+        "ROOM" -> "rooms"
+        "TENANT" -> "tenants"
+        "PAYMENT" -> "payments"
+        "EXPENSE" -> "expenses"
+        "PROPERTY" -> "properties"
+        "PROFILE" -> "properties"
+        else -> operation.entityType.lowercase() + "s"
+    }
+    val firestoreDocId = if (operation.entityType == "PROFILE") {
+        if (operation.propertyId.isNotBlank()) operation.propertyId else "property_default"
+    } else {
+        operation.entityId
+    }
+    val firestorePath = "$firestoreCollection/$firestoreDocId"
+
+    val isFailed = operation.status == "FAILED" || !operation.error.isNullOrBlank()
+
+    Card(
+        modifier = Modifier.fillMaxWidth().testTag("sync_op_${operation.id}"),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isFailed) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f)
+            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(modifier = Modifier.padding(spacing.medium)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = if (isFailed) Icons.Default.ErrorOutline else Icons.Default.Sync,
+                    contentDescription = null,
+                    tint = if (isFailed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(spacing.small))
+                Text(
+                    text = "${operation.operationType} ${operation.entityType}",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isFailed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                Surface(
+                    color = if (isFailed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    shape = RoundedCornerShape(4.dp)
+                ) {
+                    Text(
+                        text = operation.status,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onError,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(spacing.small))
+
+            // Diagnostic details table
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(spacing.small)) {
+                    DiagnosticRow(label = "Local Record ID", value = operation.entityId.ifBlank { "N/A" })
+                    DiagnosticRow(label = "Firestore Target Path", value = firestorePath)
+                    DiagnosticRow(label = "Retry Count", value = operation.retryCount.toString())
+                    DiagnosticRow(
+                        label = "Last Attempt",
+                        value = if (operation.lastAttemptAt > 0L) dateFormat.format(Date(operation.lastAttemptAt)) else "Never"
+                    )
+                    DiagnosticRow(
+                        label = "Created At",
+                        value = if (operation.createdAt > 0L) dateFormat.format(Date(operation.createdAt)) else "N/A"
+                    )
+
+                    Spacer(modifier = Modifier.height(spacing.extraSmall))
+                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(spacing.extraSmall))
+
+                    Text(
+                        text = "Failure Reason / Exception:",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isFailed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = operation.error ?: if (operation.status == "FAILED") "Operation failed (No error string recorded)" else "None (Pending execution)",
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        color = if (isFailed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(spacing.small))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        val details = buildString {
+                            appendLine("Entity: ${operation.entityType} (Local ID: ${operation.entityId})")
+                            appendLine("Operation: ${operation.operationType}")
+                            appendLine("Status: ${operation.status}")
+                            appendLine("Firestore Path: $firestorePath")
+                            appendLine("Retry Count: ${operation.retryCount}")
+                            appendLine("Error: ${operation.error ?: "None"}")
+                        }
+                        onCopy(details)
+                    },
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Copy Diagnostic Details", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DiagnosticRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+            fontWeight = FontWeight.Medium
+        )
     }
 }

@@ -83,11 +83,13 @@ data class RoomEntity(
     indices = [
         Index(value = ["ownerId"]),
         Index(value = ["ownerId", "propertyId"]),
-        Index(value = ["propertyId", "roomNumber"])
+        Index(value = ["propertyId", "roomNumber"]),
+        Index(value = ["cloudId"])
     ]
 )
 data class TenantEntity(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val cloudId: String = "",
     val name: String,
     val phone: String,
     val email: String,
@@ -124,11 +126,13 @@ data class TenantEntity(
         Index(value = ["ownerId"]),
         Index(value = ["ownerId", "propertyId"]),
         Index(value = ["propertyId", "tenantId"]),
-        Index(value = ["propertyId", "dueDate"])
+        Index(value = ["propertyId", "dueDate"]),
+        Index(value = ["cloudId"])
     ]
 )
 data class RentPaymentEntity(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val cloudId: String = "",
     val tenantId: Int,
     val tenantName: String,
     val roomNumber: String,
@@ -157,11 +161,13 @@ data class RentPaymentEntity(
     indices = [
         Index(value = ["ownerId"]),
         Index(value = ["ownerId", "propertyId"]),
-        Index(value = ["propertyId", "date"])
+        Index(value = ["propertyId", "date"]),
+        Index(value = ["cloudId"])
     ]
 )
 data class ExpenseEntity(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val cloudId: String = "",
     val amount: Double,
     val category: String, // e.g., "Plumbing", "Food", "Electricity", "Staff Salary", "Other"
     val date: String, // e.g., "2026-07-18"
@@ -375,6 +381,12 @@ interface TenantDao {
     @Query("SELECT * FROM tenants WHERE id = :id")
     suspend fun getTenantByIdIncludingDeleted(id: Int): TenantEntity?
 
+    @Query("SELECT * FROM tenants WHERE deleted = 0 AND cloudId = :cloudId LIMIT 1")
+    suspend fun getTenantByCloudId(cloudId: String): TenantEntity?
+
+    @Query("SELECT * FROM tenants WHERE cloudId = :cloudId LIMIT 1")
+    suspend fun getTenantByCloudIdIncludingDeleted(cloudId: String): TenantEntity?
+
     @Query("SELECT * FROM tenants WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL)) OR (:propertyId = '' AND (propertyId = 'property_default' OR propertyId IS NULL))) AND deleted = 0 AND roomNumber = :roomNumber")
     fun getTenantsInRoomForPropertyFlow(propertyId: String, roomNumber: String): Flow<List<TenantEntity>>
 
@@ -426,11 +438,23 @@ interface RentPaymentDao {
     @Query("SELECT * FROM payments WHERE deleted = 0 AND tenantId = :tenantId ORDER BY billingMonth DESC")
     suspend fun getPaymentsForTenantSync(tenantId: Int): List<RentPaymentEntity>
 
+    @Query("SELECT * FROM payments WHERE deleted = 0 AND tenantId = :tenantId AND (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL)) OR (:propertyId = '' AND (propertyId = 'property_default' OR propertyId IS NULL))) AND LOWER(TRIM(billingMonth)) = LOWER(TRIM(:billingMonth)) LIMIT 1")
+    suspend fun getPaymentForTenantPropertyAndMonth(tenantId: Int, propertyId: String, billingMonth: String): RentPaymentEntity?
+
+    @Query("SELECT * FROM payments WHERE deleted = 0 AND tenantId = :tenantId AND LOWER(TRIM(billingMonth)) = LOWER(TRIM(:billingMonth)) LIMIT 1")
+    suspend fun getPaymentForTenantAndMonth(tenantId: Int, billingMonth: String): RentPaymentEntity?
+
+    @Query("SELECT * FROM payments WHERE deleted = 0 AND (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL)) OR (:propertyId = '' AND (propertyId = 'property_default' OR propertyId IS NULL))) AND LOWER(TRIM(tenantName)) = LOWER(TRIM(:tenantName)) AND LOWER(TRIM(billingMonth)) = LOWER(TRIM(:billingMonth)) LIMIT 1")
+    suspend fun getPaymentForTenantNamePropertyAndMonth(tenantName: String, propertyId: String, billingMonth: String): RentPaymentEntity?
+
     @Query("SELECT * FROM payments WHERE id = :id")
     suspend fun getPaymentByIdIncludingDeleted(id: Int): RentPaymentEntity?
 
+    @Query("SELECT * FROM payments WHERE cloudId = :cloudId LIMIT 1")
+    suspend fun getPaymentByCloudIdIncludingDeleted(cloudId: String): RentPaymentEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertPayment(payment: RentPaymentEntity)
+    suspend fun insertPayment(payment: RentPaymentEntity): Long
 
     @Update
     suspend fun updatePayment(payment: RentPaymentEntity)
@@ -474,8 +498,11 @@ interface ExpenseDao {
     @Query("SELECT * FROM expenses WHERE id = :id")
     suspend fun getExpenseByIdIncludingDeleted(id: Int): ExpenseEntity?
 
+    @Query("SELECT * FROM expenses WHERE cloudId = :cloudId LIMIT 1")
+    suspend fun getExpenseByCloudIdIncludingDeleted(cloudId: String): ExpenseEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertExpense(expense: ExpenseEntity)
+    suspend fun insertExpense(expense: ExpenseEntity): Long
 
     @Update
     suspend fun updateExpense(expense: ExpenseEntity)
@@ -578,6 +605,29 @@ interface ConflictRecordDao {
 // 3. DATABASE CONTAINER & MIGRATIONS
 // ==========================================
 
+private fun addColumnIfNotExists(
+    db: SupportSQLiteDatabase,
+    tableName: String,
+    columnName: String,
+    columnDefinition: String
+) {
+    try {
+        val cursor = db.query("PRAGMA table_info($tableName)")
+        var exists = false
+        val nameIndex = cursor.getColumnIndex("name")
+        while (cursor.moveToNext()) {
+            if (nameIndex != -1 && cursor.getString(nameIndex).equals(columnName, ignoreCase = true)) {
+                exists = true
+                break
+            }
+        }
+        cursor.close()
+        if (!exists) {
+            db.execSQL("ALTER TABLE $tableName ADD COLUMN $columnName $columnDefinition")
+        }
+    } catch (_: Exception) {}
+}
+
 private fun performFullSchemaUpgradeToV8(db: SupportSQLiteDatabase) {
     // 1. Create properties table if not exists
     db.execSQL("""
@@ -618,13 +668,9 @@ private fun performFullSchemaUpgradeToV8(db: SupportSQLiteDatabase) {
     """.trimIndent())
 
     // 3. Recreate rooms table with composite primary key (propertyId, roomNumber)
-    // First ensure old rooms table has columns added so SELECT never throws column not found
-    try {
-        db.execSQL("ALTER TABLE rooms ADD COLUMN propertyId TEXT NOT NULL DEFAULT 'property_default'")
-    } catch (_: Exception) {}
-    try {
-        db.execSQL("ALTER TABLE rooms ADD COLUMN lastModifiedByDeviceId TEXT NOT NULL DEFAULT ''")
-    } catch (_: Exception) {}
+    // First ensure old rooms table has columns added safely so SELECT never throws column not found
+    addColumnIfNotExists(db, "rooms", "propertyId", "TEXT NOT NULL DEFAULT 'property_default'")
+    addColumnIfNotExists(db, "rooms", "lastModifiedByDeviceId", "TEXT NOT NULL DEFAULT ''")
 
     db.execSQL("DROP TABLE IF EXISTS rooms_temp")
     db.execSQL("""
@@ -682,65 +728,49 @@ private fun performFullSchemaUpgradeToV8(db: SupportSQLiteDatabase) {
     db.execSQL("CREATE INDEX IF NOT EXISTS index_rooms_propertyId_roomNumber ON rooms(propertyId, roomNumber)")
 
     // 4. Tenants
-    try {
-        db.execSQL("ALTER TABLE tenants ADD COLUMN propertyId TEXT NOT NULL DEFAULT 'property_default'")
-    } catch (_: Exception) {}
-    try {
-        db.execSQL("ALTER TABLE tenants ADD COLUMN lastModifiedByDeviceId TEXT NOT NULL DEFAULT ''")
-    } catch (_: Exception) {}
+    addColumnIfNotExists(db, "tenants", "propertyId", "TEXT NOT NULL DEFAULT 'property_default'")
+    addColumnIfNotExists(db, "tenants", "lastModifiedByDeviceId", "TEXT NOT NULL DEFAULT ''")
+    addColumnIfNotExists(db, "tenants", "cloudId", "TEXT NOT NULL DEFAULT ''")
     db.execSQL("UPDATE tenants SET propertyId = 'property_default' WHERE propertyId IS NULL OR propertyId = ''")
     db.execSQL("CREATE INDEX IF NOT EXISTS index_tenants_ownerId ON tenants(ownerId)")
     db.execSQL("CREATE INDEX IF NOT EXISTS index_tenants_ownerId_propertyId ON tenants(ownerId, propertyId)")
     db.execSQL("CREATE INDEX IF NOT EXISTS index_tenants_propertyId_roomNumber ON tenants(propertyId, roomNumber)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_tenants_cloudId ON tenants(cloudId)")
 
     // 5. Payments
-    try {
-        db.execSQL("ALTER TABLE payments ADD COLUMN propertyId TEXT NOT NULL DEFAULT 'property_default'")
-    } catch (_: Exception) {}
-    try {
-        db.execSQL("ALTER TABLE payments ADD COLUMN lastModifiedByDeviceId TEXT NOT NULL DEFAULT ''")
-    } catch (_: Exception) {}
+    addColumnIfNotExists(db, "payments", "propertyId", "TEXT NOT NULL DEFAULT 'property_default'")
+    addColumnIfNotExists(db, "payments", "lastModifiedByDeviceId", "TEXT NOT NULL DEFAULT ''")
+    addColumnIfNotExists(db, "payments", "cloudId", "TEXT NOT NULL DEFAULT ''")
     db.execSQL("UPDATE payments SET propertyId = 'property_default' WHERE propertyId IS NULL OR propertyId = ''")
     db.execSQL("CREATE INDEX IF NOT EXISTS index_payments_ownerId ON payments(ownerId)")
     db.execSQL("CREATE INDEX IF NOT EXISTS index_payments_ownerId_propertyId ON payments(ownerId, propertyId)")
     db.execSQL("CREATE INDEX IF NOT EXISTS index_payments_propertyId_tenantId ON payments(propertyId, tenantId)")
     db.execSQL("CREATE INDEX IF NOT EXISTS index_payments_propertyId_dueDate ON payments(propertyId, dueDate)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_payments_cloudId ON payments(cloudId)")
 
     // 6. Expenses
-    try {
-        db.execSQL("ALTER TABLE expenses ADD COLUMN propertyId TEXT NOT NULL DEFAULT 'property_default'")
-    } catch (_: Exception) {}
-    try {
-        db.execSQL("ALTER TABLE expenses ADD COLUMN lastModifiedByDeviceId TEXT NOT NULL DEFAULT ''")
-    } catch (_: Exception) {}
+    addColumnIfNotExists(db, "expenses", "propertyId", "TEXT NOT NULL DEFAULT 'property_default'")
+    addColumnIfNotExists(db, "expenses", "lastModifiedByDeviceId", "TEXT NOT NULL DEFAULT ''")
+    addColumnIfNotExists(db, "expenses", "cloudId", "TEXT NOT NULL DEFAULT ''")
     db.execSQL("UPDATE expenses SET propertyId = 'property_default' WHERE propertyId IS NULL OR propertyId = ''")
     db.execSQL("CREATE INDEX IF NOT EXISTS index_expenses_ownerId ON expenses(ownerId)")
     db.execSQL("CREATE INDEX IF NOT EXISTS index_expenses_ownerId_propertyId ON expenses(ownerId, propertyId)")
     db.execSQL("CREATE INDEX IF NOT EXISTS index_expenses_propertyId_date ON expenses(propertyId, date)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_expenses_cloudId ON expenses(cloudId)")
 
     // 7. Owner Profile
-    try {
-        db.execSQL("ALTER TABLE owner_profile ADD COLUMN propertyId TEXT NOT NULL DEFAULT 'property_default'")
-    } catch (_: Exception) {}
-    try {
-        db.execSQL("ALTER TABLE owner_profile ADD COLUMN lastModifiedByDeviceId TEXT NOT NULL DEFAULT ''")
-    } catch (_: Exception) {}
+    addColumnIfNotExists(db, "owner_profile", "propertyId", "TEXT NOT NULL DEFAULT 'property_default'")
+    addColumnIfNotExists(db, "owner_profile", "lastModifiedByDeviceId", "TEXT NOT NULL DEFAULT ''")
     db.execSQL("UPDATE owner_profile SET propertyId = 'property_default' WHERE propertyId IS NULL OR propertyId = ''")
 
     // 8. Sync Queue
-    try {
-        db.execSQL("ALTER TABLE sync_queue ADD COLUMN ownerId TEXT NOT NULL DEFAULT ''")
-    } catch (_: Exception) {}
-    try {
-        db.execSQL("ALTER TABLE sync_queue ADD COLUMN propertyId TEXT NOT NULL DEFAULT ''")
-    } catch (_: Exception) {}
+    addColumnIfNotExists(db, "sync_queue", "ownerId", "TEXT NOT NULL DEFAULT ''")
+    addColumnIfNotExists(db, "sync_queue", "propertyId", "TEXT NOT NULL DEFAULT ''")
     db.execSQL("CREATE INDEX IF NOT EXISTS index_sync_queue_status ON sync_queue(status)")
     db.execSQL("CREATE INDEX IF NOT EXISTS index_sync_queue_propertyId ON sync_queue(propertyId)")
 
     // 9. Conflict records
-    try {
-        db.execSQL("ALTER TABLE conflict_records ADD COLUMN propertyId TEXT NOT NULL DEFAULT ''")
-    } catch (_: Exception) {}
+    addColumnIfNotExists(db, "conflict_records", "propertyId", "TEXT NOT NULL DEFAULT ''")
 }
 
 val MIGRATION_1_8 = object : Migration(1, 8) { override fun migrate(db: SupportSQLiteDatabase) { performFullSchemaUpgradeToV8(db) } }
@@ -751,6 +781,18 @@ val MIGRATION_5_8 = object : Migration(5, 8) { override fun migrate(db: SupportS
 val MIGRATION_6_8 = object : Migration(6, 8) { override fun migrate(db: SupportSQLiteDatabase) { performFullSchemaUpgradeToV8(db) } }
 val MIGRATION_7_8 = object : Migration(7, 8) { override fun migrate(db: SupportSQLiteDatabase) { performFullSchemaUpgradeToV8(db) } }
 val MIGRATION_6_7 = object : Migration(6, 7) { override fun migrate(db: SupportSQLiteDatabase) { performFullSchemaUpgradeToV8(db) } }
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        addColumnIfNotExists(db, "tenants", "cloudId", "TEXT NOT NULL DEFAULT ''")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_tenants_cloudId ON tenants(cloudId)")
+
+        addColumnIfNotExists(db, "payments", "cloudId", "TEXT NOT NULL DEFAULT ''")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_payments_cloudId ON payments(cloudId)")
+
+        addColumnIfNotExists(db, "expenses", "cloudId", "TEXT NOT NULL DEFAULT ''")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_expenses_cloudId ON expenses(cloudId)")
+    }
+}
 
 @Database(
     entities = [
@@ -763,7 +805,7 @@ val MIGRATION_6_7 = object : Migration(6, 7) { override fun migrate(db: SupportS
         SyncOperationEntity::class,
         ConflictRecordEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -806,7 +848,8 @@ abstract class AppDatabase : RoomDatabase() {
                     MIGRATION_5_8,
                     MIGRATION_6_8,
                     MIGRATION_7_8,
-                    MIGRATION_6_7
+                    MIGRATION_6_7,
+                    MIGRATION_8_9
                 )
                 .fallbackToDestructiveMigration(dropAllTables = true)
                 .addCallback(DatabaseCallback(context))

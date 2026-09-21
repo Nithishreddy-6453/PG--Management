@@ -33,6 +33,7 @@ fun FinancialDashboardScreen(
     onNavigateToExpense: () -> Unit,
     onNavigateToOccupancy: () -> Unit,
     onNavigateToRent: () -> Unit,
+    onNavigateToExcelExport: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -47,6 +48,15 @@ fun FinancialDashboardScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Navigate back"
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onNavigateToExcelExport) {
+                        Icon(
+                            imageVector = Icons.Default.Assessment,
+                            contentDescription = "Export Excel",
+                            tint = MaterialTheme.colorScheme.primary
                         )
                     }
                 },
@@ -119,6 +129,7 @@ fun FinancialDashboardScreen(
                     ReportNavigationCard(title = "Expense Reports", description = "Spending breakdown", onClick = onNavigateToExpense)
                     ReportNavigationCard(title = "Rent Analytics", description = "Collections and outstandings", onClick = onNavigateToRent)
                     ReportNavigationCard(title = "Occupancy Analytics", description = "Room and bed utilization", onClick = onNavigateToOccupancy)
+                    ReportNavigationCard(title = "Export to Excel (.xlsx)", description = "Download 5-sheet financial & tenant workbook", onClick = onNavigateToExcelExport)
                 }
             }
         }

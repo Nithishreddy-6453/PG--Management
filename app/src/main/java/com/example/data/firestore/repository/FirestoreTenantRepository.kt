@@ -25,9 +25,15 @@ class FirestoreTenantRepository @Inject constructor(
 
     suspend fun saveTenant(tenantDto: TenantDto): PgResult<Unit> {
         return try {
-            val docId = if (tenantDto.id.isNotBlank()) tenantDto.id else "tenant_${tenantDto.localId}"
+            val docId = when {
+                tenantDto.cloudId.isNotBlank() -> tenantDto.cloudId
+                tenantDto.id.isNotBlank() -> tenantDto.id
+                tenantDto.localId > 0 -> "tenant_${tenantDto.localId}"
+                else -> "tenant_${System.currentTimeMillis()}"
+            }
             val dtoToSave = tenantDto.copy(
                 id = docId,
+                cloudId = docId,
                 ownerId = if (tenantDto.ownerId.isNotBlank()) tenantDto.ownerId else currentOwnerId,
                 updatedAt = System.currentTimeMillis()
             )

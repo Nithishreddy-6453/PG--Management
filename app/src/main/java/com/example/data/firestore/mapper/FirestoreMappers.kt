@@ -71,9 +71,11 @@ fun PropertyDto.toEntity(): PropertyEntity {
 // ROOM MAPPERS
 // ==========================================
 fun RoomEntity.toDto(ownerId: String, deviceId: String = ""): RoomDto {
+    val propId = if (propertyId.isNotBlank()) propertyId else "property_default"
     return RoomDto(
-        id = "${propertyId}_$roomNumber",
+        id = "${propId}_$roomNumber",
         ownerId = ownerId,
+        propertyId = propId,
         roomNumber = roomNumber,
         floor = floor,
         capacity = capacity,
@@ -91,6 +93,13 @@ fun RoomEntity.toDto(ownerId: String, deviceId: String = ""): RoomDto {
 }
 
 fun RoomDto.toEntity(): RoomEntity {
+    val propId = if (propertyId.isNotBlank() && propertyId != "property_default") {
+        propertyId
+    } else if (id.contains("_")) {
+        id.substringBefore("_")
+    } else {
+        "property_default"
+    }
     return RoomEntity(
         roomNumber = roomNumber,
         floor = floor,
@@ -99,7 +108,7 @@ fun RoomDto.toEntity(): RoomEntity {
         roomType = roomType,
         notes = notes,
         ownerId = ownerId,
-        propertyId = if (id.contains("_")) id.substringBefore("_") else "property_default",
+        propertyId = propId,
         createdAt = createdAt,
         updatedAt = updatedAt,
         version = version,
@@ -114,10 +123,17 @@ fun RoomDto.toEntity(): RoomEntity {
 // TENANT MAPPERS
 // ==========================================
 fun TenantEntity.toDto(ownerId: String, deviceId: String = ""): TenantDto {
-    val docId = if (id > 0) "tenant_$id" else "tenant_${System.currentTimeMillis()}"
+    val docId = when {
+        cloudId.isNotBlank() -> cloudId
+        id > 0 -> "tenant_$id"
+        else -> "tenant_${System.currentTimeMillis()}"
+    }
+    val propId = if (propertyId.isNotBlank()) propertyId else "property_default"
     return TenantDto(
         id = docId,
+        cloudId = docId,
         ownerId = ownerId,
+        propertyId = propId,
         localId = id,
         name = name,
         phone = phone,
@@ -149,8 +165,16 @@ fun TenantEntity.toDto(ownerId: String, deviceId: String = ""): TenantDto {
 }
 
 fun TenantDto.toEntity(): TenantEntity {
+    val cId = when {
+        cloudId.isNotBlank() -> cloudId
+        id.isNotBlank() -> id
+        localId > 0 -> "tenant_$localId"
+        else -> ""
+    }
+    val propId = if (propertyId.isNotBlank()) propertyId else "property_default"
     return TenantEntity(
         id = localId,
+        cloudId = cId,
         name = name,
         phone = phone,
         email = email,
@@ -171,7 +195,7 @@ fun TenantDto.toEntity(): TenantEntity {
         advancePaid = advancePaid,
         notes = notes,
         ownerId = ownerId,
-        propertyId = "property_default",
+        propertyId = propId,
         createdAt = createdAt,
         updatedAt = updatedAt,
         version = version,
@@ -186,10 +210,17 @@ fun TenantDto.toEntity(): TenantEntity {
 // RENT PAYMENT MAPPERS
 // ==========================================
 fun RentPaymentEntity.toDto(ownerId: String, deviceId: String = ""): PaymentDto {
-    val docId = if (id > 0) "payment_$id" else "payment_${System.currentTimeMillis()}"
+    val docId = when {
+        cloudId.isNotBlank() -> cloudId
+        id > 0 -> "payment_$id"
+        else -> "payment_${System.currentTimeMillis()}"
+    }
+    val propId = if (propertyId.isNotBlank()) propertyId else "property_default"
     return PaymentDto(
         id = docId,
+        cloudId = docId,
         ownerId = ownerId,
+        propertyId = propId,
         localId = id,
         tenantId = tenantId,
         tenantName = tenantName,
@@ -214,8 +245,16 @@ fun RentPaymentEntity.toDto(ownerId: String, deviceId: String = ""): PaymentDto 
 }
 
 fun PaymentDto.toEntity(): RentPaymentEntity {
+    val cId = when {
+        cloudId.isNotBlank() -> cloudId
+        id.isNotBlank() -> id
+        localId > 0 -> "payment_$localId"
+        else -> ""
+    }
+    val propId = if (propertyId.isNotBlank()) propertyId else "property_default"
     return RentPaymentEntity(
         id = localId,
+        cloudId = cId,
         tenantId = tenantId,
         tenantName = tenantName,
         roomNumber = roomNumber,
@@ -229,7 +268,7 @@ fun PaymentDto.toEntity(): RentPaymentEntity {
         remarks = remarks,
         status = status,
         ownerId = ownerId,
-        propertyId = "property_default",
+        propertyId = propId,
         createdAt = createdAt,
         updatedAt = updatedAt,
         version = version,
@@ -244,10 +283,17 @@ fun PaymentDto.toEntity(): RentPaymentEntity {
 // EXPENSE MAPPERS
 // ==========================================
 fun ExpenseEntity.toDto(ownerId: String, deviceId: String = ""): ExpenseDto {
-    val docId = if (id > 0) "expense_$id" else "expense_${System.currentTimeMillis()}"
+    val docId = when {
+        cloudId.isNotBlank() -> cloudId
+        id > 0 -> "expense_$id"
+        else -> "expense_${System.currentTimeMillis()}"
+    }
+    val propId = if (propertyId.isNotBlank()) propertyId else "property_default"
     return ExpenseDto(
         id = docId,
+        cloudId = docId,
         ownerId = ownerId,
+        propertyId = propId,
         localId = id,
         amount = amount,
         category = category,
@@ -267,8 +313,16 @@ fun ExpenseEntity.toDto(ownerId: String, deviceId: String = ""): ExpenseDto {
 }
 
 fun ExpenseDto.toEntity(): ExpenseEntity {
+    val cId = when {
+        cloudId.isNotBlank() -> cloudId
+        id.isNotBlank() -> id
+        localId > 0 -> "expense_$localId"
+        else -> ""
+    }
+    val propId = if (propertyId.isNotBlank()) propertyId else "property_default"
     return ExpenseEntity(
         id = localId,
+        cloudId = cId,
         amount = amount,
         category = category,
         date = date,
@@ -277,7 +331,7 @@ fun ExpenseDto.toEntity(): ExpenseEntity {
         paymentMethod = paymentMethod,
         vendor = vendor,
         ownerId = ownerId,
-        propertyId = "property_default",
+        propertyId = propId,
         createdAt = createdAt,
         updatedAt = updatedAt,
         version = version,

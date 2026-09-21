@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.core.common.PgResult
 import com.example.data.database.ConflictRecordEntity
+import com.example.data.database.SyncOperationEntity
 import com.example.data.sync.ConflictResolutionStrategy
 import com.example.data.sync.SyncCoordinator
 import com.example.data.sync.SyncDiagnostics
@@ -38,6 +39,13 @@ class SyncViewModel @Inject constructor(
         )
 
     val conflicts: StateFlow<List<ConflictRecordEntity>> = syncCoordinator.conflictRecordsFlow
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    val syncOperations: StateFlow<List<SyncOperationEntity>> = syncCoordinator.syncOperationsFlow
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),

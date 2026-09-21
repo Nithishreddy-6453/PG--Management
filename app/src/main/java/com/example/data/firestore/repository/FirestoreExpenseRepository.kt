@@ -25,9 +25,15 @@ class FirestoreExpenseRepository @Inject constructor(
 
     suspend fun saveExpense(expenseDto: ExpenseDto): PgResult<Unit> {
         return try {
-            val docId = if (expenseDto.id.isNotBlank()) expenseDto.id else "expense_${expenseDto.localId}"
+            val docId = when {
+                expenseDto.cloudId.isNotBlank() -> expenseDto.cloudId
+                expenseDto.id.isNotBlank() -> expenseDto.id
+                expenseDto.localId > 0 -> "expense_${expenseDto.localId}"
+                else -> "expense_${System.currentTimeMillis()}"
+            }
             val dtoToSave = expenseDto.copy(
                 id = docId,
+                cloudId = docId,
                 ownerId = if (expenseDto.ownerId.isNotBlank()) expenseDto.ownerId else currentOwnerId,
                 updatedAt = System.currentTimeMillis()
             )

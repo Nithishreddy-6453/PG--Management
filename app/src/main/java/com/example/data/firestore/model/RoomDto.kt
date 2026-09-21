@@ -6,6 +6,7 @@ package com.example.data.firestore.model
 data class RoomDto(
     val id: String = "",
     val ownerId: String = "",
+    val propertyId: String = "property_default",
     val roomNumber: String = "",
     val floor: String = "",
     val capacity: Int = 0,

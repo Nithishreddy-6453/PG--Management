@@ -47,6 +47,8 @@ class SyncCoordinator @Inject constructor(
 
     val conflictRecordsFlow: Flow<List<ConflictRecordEntity>> = syncEngine.conflictRecordsFlow
 
+    val syncOperationsFlow: Flow<List<SyncOperationEntity>> = syncQueueDao.getAllOperationsFlow()
+
     suspend fun enqueueOperation(
         entityType: String,
         entityId: String,

@@ -5,7 +5,9 @@ package com.example.data.firestore.model
  */
 data class TenantDto(
     val id: String = "",
+    val cloudId: String = "",
     val ownerId: String = "",
+    val propertyId: String = "property_default",
     val localId: Int = 0,
     val name: String = "",
     val phone: String = "",

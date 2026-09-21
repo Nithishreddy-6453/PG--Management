@@ -61,7 +61,8 @@ class PgViewModel @Inject constructor(
         val totalBeds = roomsList.sumOf { it.capacity }
         
         // Active Occupancy (tenants currently assigned)
-        val occupiedBeds = tenantsList.size
+        val activeTenants = tenantsList.filter { !it.deleted && it.roomNumber.isNotBlank() }
+        val occupiedBeds = activeTenants.size
         
         // Total rent collected (Status = "Paid")
         val rentCollected = paymentsList
@@ -212,8 +213,6 @@ class PgViewModel @Inject constructor(
 
     fun recordPayment(paymentId: Int, paymentMode: String, amount: Double) {
         viewModelScope.launch {
-            // Find existing payment and update it
-            // We can map payments list
             val currentPayments = payments.value
             val match = currentPayments.find { it.id == paymentId }
             if (match != null) {
@@ -223,7 +222,8 @@ class PgViewModel @Inject constructor(
                         status = "Paid",
                         paymentDate = currentDate,
                         paymentMode = paymentMode,
-                        amount = amount // update collected amount if changed
+                        amountPaid = amount,
+                        amount = if (match.amount > 0) match.amount else amount
                     )
                 )
             }

@@ -20,6 +20,9 @@ import javax.inject.Inject
 data class PaymentUiState(
     val isLoading: Boolean = false,
     val paymentId: Int? = null,
+    val cloudId: String = "",
+    val ownerId: String = "",
+    val propertyId: String = "",
     val tenantId: Int = 0,
     val tenantName: String = "",
     val roomNumber: String = "",
@@ -61,14 +64,24 @@ class PaymentViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(isLoading = true)
                 val payment = rentRepository.getLedger().firstOrNull()?.find { it.id == paymentId }
                 if (payment != null) {
+                    val initialAmountPaid = if (payment.amountPaid > 0) {
+                        payment.amountPaid.toString()
+                    } else if (payment.amount > 0) {
+                        payment.amount.toString()
+                    } else {
+                        ""
+                    }
                     _uiState.value = PaymentUiState(
                         paymentId = payment.id,
+                        cloudId = payment.cloudId,
+                        ownerId = payment.ownerId,
+                        propertyId = payment.propertyId,
                         tenantId = payment.tenantId,
                         tenantName = payment.tenantName,
                         roomNumber = payment.roomNumber,
                         billingMonth = payment.billingMonth,
                         expectedAmount = payment.amount,
-                        amountPaid = payment.amountPaid.toString(),
+                        amountPaid = initialAmountPaid,
                         dueDate = payment.dueDate,
                         paymentDate = payment.paymentDate ?: java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date()),
                         paymentMode = payment.paymentMode ?: "UPI",
@@ -111,7 +124,7 @@ class PaymentViewModel @Inject constructor(
             return
         }
 
-        if (amountPaidDouble > state.expectedAmount) {
+        if (state.expectedAmount > 0 && amountPaidDouble > state.expectedAmount) {
             _uiState.value = state.copy(error = "Amount paid cannot exceed expected amount")
             return
         }
@@ -119,23 +132,31 @@ class PaymentViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 _uiState.value = state.copy(isLoading = true)
+                val calculatedStatus = when {
+                    state.expectedAmount > 0 && amountPaidDouble >= state.expectedAmount -> "Paid"
+                    amountPaidDouble > 0 -> "Paid"
+                    else -> "Pending"
+                }
                 val updatedPayment = RentPaymentEntity(
                     id = state.paymentId ?: 0,
+                    cloudId = state.cloudId,
+                    ownerId = state.ownerId,
+                    propertyId = state.propertyId,
                     tenantId = state.tenantId,
                     tenantName = state.tenantName,
                     roomNumber = state.roomNumber,
                     billingMonth = state.billingMonth,
-                    amount = state.expectedAmount,
+                    amount = if (state.expectedAmount > 0) state.expectedAmount else amountPaidDouble,
                     amountPaid = amountPaidDouble,
                     dueDate = state.dueDate,
                     paymentDate = state.paymentDate,
                     paymentMode = state.paymentMode,
                     transactionReference = state.transactionReference.takeIf { it.isNotBlank() },
                     remarks = state.remarks.takeIf { it.isNotBlank() },
-                    status = "Pending" // Will be recalculated in use case
+                    status = calculatedStatus
                 )
                 
-                if (state.paymentId != null) {
+                if (state.paymentId != null && state.paymentId > 0) {
                     updatePaymentUseCase(updatedPayment)
                 } else {
                     recordPaymentUseCase(updatedPayment)

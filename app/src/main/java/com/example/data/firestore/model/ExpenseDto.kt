@@ -5,7 +5,9 @@ package com.example.data.firestore.model
  */
 data class ExpenseDto(
     val id: String = "",
+    val cloudId: String = "",
     val ownerId: String = "",
+    val propertyId: String = "property_default",
     val localId: Int = 0,
     val amount: Double = 0.0,
     val category: String = "",

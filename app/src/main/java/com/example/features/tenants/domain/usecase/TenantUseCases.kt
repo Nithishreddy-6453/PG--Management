@@ -233,7 +233,7 @@ class UpdateTenantUseCase @Inject constructor(
             val room = repository.getRoom(roomNumber)
                 ?: return TenantValidationResult.Error("Room $roomNumber does not exist.")
 
-            val activeTenants = repository.getTenantsInRoom(roomNumber).filter { it.id != id }
+            val activeTenants = repository.getTenantsInRoom(roomNumber).filter { it.id != id && !it.deleted && it.roomNumber.isNotBlank() }
             if (existingTenant.roomNumber != roomNumber && activeTenants.size >= room.capacity) {
                 return TenantValidationResult.Error("Target Room $roomNumber is at full capacity (${room.capacity} beds).")
             }
@@ -311,7 +311,7 @@ class AssignRoomUseCase @Inject constructor(
         val room = repository.getRoom(roomNumber)
             ?: return TenantValidationResult.Error("Room $roomNumber does not exist.")
 
-        val activeTenants = repository.getTenantsInRoom(roomNumber).filter { it.id != tenantId }
+        val activeTenants = repository.getTenantsInRoom(roomNumber).filter { it.id != tenantId && !it.deleted && it.roomNumber.isNotBlank() }
         if (activeTenants.size >= room.capacity) {
             return TenantValidationResult.Error("Room $roomNumber is at full capacity.")
         }

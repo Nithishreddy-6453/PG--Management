@@ -33,19 +33,28 @@ class ExpenseRepositoryImpl @Inject constructor(
 
     override suspend fun insertExpense(expense: Expense) {
         val currentPropId = currentPropertyManager.getCurrentPropertyId()
+        val ownerId = try { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "" } catch (_: Exception) { "" }
         val entity = expense.toEntity().copy(
+            cloudId = "expense_${java.util.UUID.randomUUID()}",
             propertyId = currentPropId,
+            ownerId = ownerId,
             updatedAt = System.currentTimeMillis(),
             syncStatus = "PENDING_UPLOAD"
         )
-        expenseDao.insertExpense(entity)
-        syncCoordinator?.enqueueOperation("EXPENSE", entity.id.toString(), "CREATE")
+        val insertedId = expenseDao.insertExpense(entity)
+        val finalId = if (entity.id > 0) entity.id else insertedId.toInt()
+        syncCoordinator?.enqueueOperation("EXPENSE", finalId.toString(), "CREATE")
     }
 
     override suspend fun updateExpense(expense: Expense) {
         val currentPropId = currentPropertyManager.getCurrentPropertyId()
+        val ownerId = try { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "" } catch (_: Exception) { "" }
+        val existing = expenseDao.getExpenseByIdIncludingDeleted(expense.id)
+        val cloudId = existing?.cloudId?.ifBlank { "expense_${expense.id}" } ?: "expense_${expense.id}"
         val entity = expense.toEntity().copy(
+            cloudId = cloudId,
             propertyId = currentPropId,
+            ownerId = if (existing?.ownerId?.isNotBlank() == true) existing.ownerId else ownerId,
             updatedAt = System.currentTimeMillis(),
             syncStatus = "PENDING_UPLOAD"
         )

@@ -25,9 +25,15 @@ class FirestorePaymentRepository @Inject constructor(
 
     suspend fun savePayment(paymentDto: PaymentDto): PgResult<Unit> {
         return try {
-            val docId = if (paymentDto.id.isNotBlank()) paymentDto.id else "payment_${paymentDto.localId}"
+            val docId = when {
+                paymentDto.cloudId.isNotBlank() -> paymentDto.cloudId
+                paymentDto.id.isNotBlank() -> paymentDto.id
+                paymentDto.localId > 0 -> "payment_${paymentDto.localId}"
+                else -> "payment_${System.currentTimeMillis()}"
+            }
             val dtoToSave = paymentDto.copy(
                 id = docId,
+                cloudId = docId,
                 ownerId = if (paymentDto.ownerId.isNotBlank()) paymentDto.ownerId else currentOwnerId,
                 updatedAt = System.currentTimeMillis()
             )

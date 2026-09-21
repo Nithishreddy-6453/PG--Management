@@ -23,24 +23,122 @@ class RentRepositoryImpl @Inject constructor(
 
     override suspend fun recordPayment(payment: RentPaymentEntity) {
         val currentPropId = currentPropertyManager.getCurrentPropertyId()
-        val updated = payment.copy(
-            propertyId = if (payment.propertyId.isNotBlank() && payment.propertyId != "property_default") payment.propertyId else currentPropId,
-            updatedAt = System.currentTimeMillis(),
-            syncStatus = "PENDING_UPLOAD"
-        )
-        rentPaymentDao.insertPayment(updated)
-        syncCoordinator?.enqueueOperation("PAYMENT", updated.id.toString(), "CREATE")
+        val ownerId = try { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "" } catch (_: Exception) { "" }
+
+        // Find if an existing active payment already exists using stable identity
+        val existingPayment: RentPaymentEntity? = when {
+            payment.id > 0 -> rentPaymentDao.getPaymentByIdIncludingDeleted(payment.id)
+            payment.cloudId.isNotBlank() -> rentPaymentDao.getPaymentByCloudIdIncludingDeleted(payment.cloudId)
+            payment.tenantId > 0 && payment.billingMonth.isNotBlank() -> {
+                rentPaymentDao.getPaymentForTenantPropertyAndMonth(payment.tenantId, currentPropId, payment.billingMonth)
+                    ?: rentPaymentDao.getPaymentForTenantAndMonth(payment.tenantId, payment.billingMonth)
+            }
+            payment.tenantName.isNotBlank() && payment.billingMonth.isNotBlank() -> {
+                rentPaymentDao.getPaymentForTenantNamePropertyAndMonth(payment.tenantName, currentPropId, payment.billingMonth)
+            }
+            else -> null
+        }
+
+        if (existingPayment != null && !existingPayment.deleted) {
+            val expectedAmount = if (payment.amount > 0) payment.amount else existingPayment.amount
+            val amountPaid = payment.amountPaid
+            val calculatedStatus = when {
+                amountPaid >= expectedAmount -> "Paid"
+                amountPaid > 0 -> "Partial"
+                else -> "Pending"
+            }
+            val paymentDate = payment.paymentDate ?: java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+            
+            val updated = existingPayment.copy(
+                tenantName = payment.tenantName.ifBlank { existingPayment.tenantName },
+                roomNumber = payment.roomNumber.ifBlank { existingPayment.roomNumber },
+                billingMonth = payment.billingMonth.ifBlank { existingPayment.billingMonth },
+                amount = expectedAmount,
+                amountPaid = amountPaid,
+                dueDate = payment.dueDate.ifBlank { existingPayment.dueDate },
+                paymentDate = if (amountPaid > 0) paymentDate else existingPayment.paymentDate,
+                paymentMode = payment.paymentMode ?: existingPayment.paymentMode ?: "UPI",
+                transactionReference = payment.transactionReference ?: existingPayment.transactionReference,
+                remarks = payment.remarks ?: existingPayment.remarks,
+                status = calculatedStatus,
+                propertyId = if (existingPayment.propertyId.isNotBlank() && existingPayment.propertyId != "property_default") existingPayment.propertyId else currentPropId,
+                ownerId = if (existingPayment.ownerId.isNotBlank()) existingPayment.ownerId else ownerId,
+                updatedAt = System.currentTimeMillis(),
+                syncStatus = "PENDING_UPLOAD"
+            )
+            rentPaymentDao.updatePayment(updated)
+            syncCoordinator?.enqueueOperation("PAYMENT", updated.id.toString(), "UPDATE")
+        } else {
+            val cloudId = if (payment.cloudId.isNotBlank()) payment.cloudId else "payment_${java.util.UUID.randomUUID()}"
+            val calculatedStatus = when {
+                payment.amountPaid >= payment.amount -> "Paid"
+                payment.amountPaid > 0 -> "Partial"
+                else -> "Pending"
+            }
+            val updated = payment.copy(
+                cloudId = cloudId,
+                propertyId = if (payment.propertyId.isNotBlank() && payment.propertyId != "property_default") payment.propertyId else currentPropId,
+                ownerId = if (payment.ownerId.isNotBlank()) payment.ownerId else ownerId,
+                status = calculatedStatus,
+                updatedAt = System.currentTimeMillis(),
+                syncStatus = "PENDING_UPLOAD"
+            )
+            val insertedId = rentPaymentDao.insertPayment(updated)
+            val finalId = if (updated.id > 0) updated.id else insertedId.toInt()
+            syncCoordinator?.enqueueOperation("PAYMENT", finalId.toString(), "CREATE")
+        }
     }
 
     override suspend fun updatePayment(payment: RentPaymentEntity) {
         val currentPropId = currentPropertyManager.getCurrentPropertyId()
-        val updated = payment.copy(
-            propertyId = if (payment.propertyId.isNotBlank() && payment.propertyId != "property_default") payment.propertyId else currentPropId,
-            updatedAt = System.currentTimeMillis(),
-            syncStatus = "PENDING_UPLOAD"
-        )
-        rentPaymentDao.updatePayment(updated)
-        syncCoordinator?.enqueueOperation("PAYMENT", updated.id.toString(), "UPDATE")
+        val ownerId = try { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "" } catch (_: Exception) { "" }
+
+        // Find existing record by ID or by stable identity
+        val existingPayment: RentPaymentEntity? = when {
+            payment.id > 0 -> rentPaymentDao.getPaymentByIdIncludingDeleted(payment.id)
+            payment.cloudId.isNotBlank() -> rentPaymentDao.getPaymentByCloudIdIncludingDeleted(payment.cloudId)
+            payment.tenantId > 0 && payment.billingMonth.isNotBlank() -> {
+                rentPaymentDao.getPaymentForTenantPropertyAndMonth(payment.tenantId, currentPropId, payment.billingMonth)
+                    ?: rentPaymentDao.getPaymentForTenantAndMonth(payment.tenantId, payment.billingMonth)
+            }
+            payment.tenantName.isNotBlank() && payment.billingMonth.isNotBlank() -> {
+                rentPaymentDao.getPaymentForTenantNamePropertyAndMonth(payment.tenantName, currentPropId, payment.billingMonth)
+            }
+            else -> null
+        }
+
+        if (existingPayment != null && !existingPayment.deleted) {
+            val expectedAmount = if (payment.amount > 0) payment.amount else existingPayment.amount
+            val amountPaid = payment.amountPaid
+            val calculatedStatus = when {
+                amountPaid >= expectedAmount -> "Paid"
+                amountPaid > 0 -> "Partial"
+                else -> "Pending"
+            }
+            val paymentDate = payment.paymentDate ?: java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+
+            val updated = existingPayment.copy(
+                tenantName = payment.tenantName.ifBlank { existingPayment.tenantName },
+                roomNumber = payment.roomNumber.ifBlank { existingPayment.roomNumber },
+                billingMonth = payment.billingMonth.ifBlank { existingPayment.billingMonth },
+                amount = expectedAmount,
+                amountPaid = amountPaid,
+                dueDate = payment.dueDate.ifBlank { existingPayment.dueDate },
+                paymentDate = if (amountPaid > 0) paymentDate else existingPayment.paymentDate,
+                paymentMode = payment.paymentMode ?: existingPayment.paymentMode ?: "UPI",
+                transactionReference = payment.transactionReference ?: existingPayment.transactionReference,
+                remarks = payment.remarks ?: existingPayment.remarks,
+                status = calculatedStatus,
+                propertyId = if (existingPayment.propertyId.isNotBlank() && existingPayment.propertyId != "property_default") existingPayment.propertyId else currentPropId,
+                ownerId = if (existingPayment.ownerId.isNotBlank()) existingPayment.ownerId else ownerId,
+                updatedAt = System.currentTimeMillis(),
+                syncStatus = "PENDING_UPLOAD"
+            )
+            rentPaymentDao.updatePayment(updated)
+            syncCoordinator?.enqueueOperation("PAYMENT", updated.id.toString(), "UPDATE")
+        } else {
+            recordPayment(payment)
+        }
     }
 
     override suspend fun deletePayment(id: Int) {
@@ -50,12 +148,14 @@ class RentRepositoryImpl @Inject constructor(
 
     override suspend fun generateMonthlyInvoices(dueDateStr: String, billingMonthStr: String) {
         val currentPropId = currentPropertyManager.getCurrentPropertyId()
+        val ownerId = try { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "" } catch (_: Exception) { "" }
         val tenants = tenantDao.getAllTenants(currentPropId)
         for (tenant in tenants) {
             // Check if invoice already exists for this month and tenant
             val existingPayments = rentPaymentDao.getPaymentsForTenantSync(tenant.id)
-            if (existingPayments.none { it.billingMonth == billingMonthStr }) {
+            if (existingPayments.none { !it.deleted && it.billingMonth.trim().equals(billingMonthStr.trim(), ignoreCase = true) }) {
                 val newInvoice = RentPaymentEntity(
+                    cloudId = "payment_${java.util.UUID.randomUUID()}",
                     tenantId = tenant.id,
                     tenantName = tenant.name,
                     roomNumber = tenant.roomNumber,
@@ -66,9 +166,13 @@ class RentRepositoryImpl @Inject constructor(
                     paymentDate = null,
                     paymentMode = null,
                     status = "Pending",
-                    propertyId = currentPropId
+                    ownerId = ownerId,
+                    propertyId = currentPropId,
+                    syncStatus = "PENDING_UPLOAD",
+                    updatedAt = System.currentTimeMillis()
                 )
-                rentPaymentDao.insertPayment(newInvoice)
+                val insertedId = rentPaymentDao.insertPayment(newInvoice)
+                syncCoordinator?.enqueueOperation("PAYMENT", insertedId.toString(), "CREATE")
             }
         }
     }

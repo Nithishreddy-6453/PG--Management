@@ -35,6 +35,7 @@ fun TenantsScreen(
     onBackClick: () -> Unit,
     onTenantClick: (Int) -> Unit,
     onAddTenantClick: () -> Unit,
+    onImportExcelClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val spacing = LocalSpacing.current
@@ -58,6 +59,12 @@ fun TenantsScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = onImportExcelClick,
+                        modifier = Modifier.testTag("import_tenants_excel_button")
+                    ) {
+                        Icon(imageVector = Icons.Default.FileUpload, contentDescription = "Import from Excel")
+                    }
                     IconButton(
                         onClick = { showSortMenu = true },
                         modifier = Modifier.testTag("sort_tenants_button")

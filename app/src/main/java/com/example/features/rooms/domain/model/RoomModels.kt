@@ -14,10 +14,11 @@ data class RoomSummary(
     val roomType: String get() = room.roomType
     val notes: String get() = room.notes
     
-    val occupiedBeds: Int get() = tenants.size
+    val activeTenants: List<TenantEntity> get() = tenants.filter { !it.deleted && it.roomNumber.isNotBlank() }
+    val occupiedBeds: Int get() = activeTenants.size
     val availableBeds: Int get() = (totalBeds - occupiedBeds).coerceAtLeast(0)
     
-    val activeTenantCount: Int get() = tenants.size
+    val activeTenantCount: Int get() = activeTenants.size
     
     val occupancyStatus: String get() = when {
         occupiedBeds == 0 -> "Empty"

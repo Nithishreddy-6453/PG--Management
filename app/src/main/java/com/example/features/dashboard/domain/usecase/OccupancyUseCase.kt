@@ -21,14 +21,15 @@ class OccupancyUseCase @Inject constructor(
 ) {
     operator fun invoke(): Flow<OccupancyStats> {
         return combine(repository.getRoomsFlow(), repository.getTenantsFlow()) { rooms, tenants ->
+            val activeTenants = tenants.filter { !it.deleted && it.roomNumber.isNotBlank() }
             val totalRooms = rooms.size
-            val occupiedRooms = rooms.count { room -> tenants.any { it.roomNumber == room.roomNumber } }
+            val occupiedRooms = rooms.count { room -> activeTenants.any { it.roomNumber == room.roomNumber } }
             val vacantRooms = totalRooms - occupiedRooms
             val occupancyPercent = if (totalRooms > 0) (occupiedRooms.toDouble() / totalRooms.toDouble()) * 100.0 else 0.0
             
             val totalBeds = rooms.sumOf { it.capacity }
-            val occupiedBeds = tenants.size
-            val vacantBeds = totalBeds - occupiedBeds
+            val occupiedBeds = activeTenants.size
+            val vacantBeds = (totalBeds - occupiedBeds).coerceAtLeast(0)
             val bedOccupancyPercent = if (totalBeds > 0) (occupiedBeds.toDouble() / totalBeds.toDouble()) * 100.0 else 0.0
             
             OccupancyStats(

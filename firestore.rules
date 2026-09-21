@@ -2,70 +2,57 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Helper function to verify owner access
-    function isOwner(ownerId) {
-      return request.auth != null && request.auth.uid == ownerId;
-    }
-    
-    // Default deny all
-    match /{document=**} {
-      allow read, write: if false;
+    // Check if request is authenticated
+    function isAuthenticated() {
+      return request.auth != null && request.auth.uid != null;
     }
 
-    // Users Collection
+    // Check if the current authenticated user owns the document being created, read, updated, or deleted
+    function isOwner() {
+      return isAuthenticated() && (
+        (request.resource != null && request.resource.data != null && request.resource.data.ownerId == request.auth.uid) ||
+        (resource != null && resource.data != null && resource.data.ownerId == request.auth.uid)
+      );
+    }
+
+    // User Profile Document (keyed by Firebase Auth UID)
     match /users/{userId} {
-      allow read, delete: if request.auth != null && request.auth.uid == userId;
-      allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
-      allow update: if request.auth != null && request.auth.uid == userId && (!('ownerId' in request.resource.data) || request.resource.data.ownerId == userId);
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
     }
 
     // Properties Collection
     match /properties/{propertyId} {
-      allow read, delete: if isOwner(resource.data.ownerId);
-      allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
-      allow update: if isOwner(resource.data.ownerId) && request.resource.data.ownerId == resource.data.ownerId;
+      allow read, write: if isOwner();
     }
 
     // Rooms Collection
     match /rooms/{roomId} {
-      allow read, delete: if isOwner(resource.data.ownerId);
-      allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
-      allow update: if isOwner(resource.data.ownerId) && request.resource.data.ownerId == resource.data.ownerId;
+      allow read, write: if isOwner();
     }
 
     // Tenants Collection
     match /tenants/{tenantId} {
-      allow read, delete: if isOwner(resource.data.ownerId);
-      allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
-      allow update: if isOwner(resource.data.ownerId) && request.resource.data.ownerId == resource.data.ownerId;
+      allow read, write: if isOwner();
     }
 
     // Payments Collection
     match /payments/{paymentId} {
-      allow read, delete: if isOwner(resource.data.ownerId);
-      allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
-      allow update: if isOwner(resource.data.ownerId) && request.resource.data.ownerId == resource.data.ownerId;
+      allow read, write: if isOwner();
     }
 
     // Expenses Collection
     match /expenses/{expenseId} {
-      allow read, delete: if isOwner(resource.data.ownerId);
-      allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
-      allow update: if isOwner(resource.data.ownerId) && request.resource.data.ownerId == resource.data.ownerId;
+      allow read, write: if isOwner();
     }
 
     // Reports Collection
     match /reports/{reportId} {
-      allow read, delete: if isOwner(resource.data.ownerId);
-      allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
-      allow update: if isOwner(resource.data.ownerId) && request.resource.data.ownerId == resource.data.ownerId;
+      allow read, write: if isOwner();
     }
 
     // Settings Collection
     match /settings/{settingId} {
-      allow read, delete: if isOwner(resource.data.ownerId);
-      allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
-      allow update: if isOwner(resource.data.ownerId) && request.resource.data.ownerId == resource.data.ownerId;
+      allow read, write: if isOwner();
     }
   }
 }

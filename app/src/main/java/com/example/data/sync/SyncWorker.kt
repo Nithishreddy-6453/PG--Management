@@ -29,15 +29,15 @@ class SyncWorker @AssistedInject constructor(
             return Result.success()
         }
         return try {
-            when (val result = syncEngine.syncNow()) {
-                is PgResult.Success -> Result.success()
-                is PgResult.Failure -> {
-                    if (runAttemptCount < MAX_RETRIES) {
-                        Result.retry()
-                    } else {
-                        Result.failure()
-                    }
+            var result = syncEngine.syncNow()
+            if (result is PgResult.Failure) {
+                if (runAttemptCount < MAX_RETRIES) {
+                    Result.retry()
+                } else {
+                    Result.failure()
                 }
+            } else {
+                Result.success()
             }
         } catch (e: Exception) {
             Result.failure()
@@ -100,7 +100,7 @@ class SyncWorker @AssistedInject constructor(
 
                 WorkManager.getInstance(context).enqueueUniqueWork(
                     ONE_TIME_WORK_NAME,
-                    ExistingWorkPolicy.REPLACE,
+                    ExistingWorkPolicy.KEEP,
                     oneTimeRequest
                 )
             } catch (e: Exception) {

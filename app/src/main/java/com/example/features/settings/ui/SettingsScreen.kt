@@ -34,6 +34,8 @@ fun SettingsScreen(
     onNavigateToNotifications: () -> Unit,
     onNavigateToBackup: () -> Unit,
     onNavigateToSync: () -> Unit = {},
+    onNavigateToExcelExport: () -> Unit = {},
+    onNavigateToExcelImport: () -> Unit = {},
     onNavigateToAbout: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -143,6 +145,33 @@ fun SettingsScreen(
                     title = "Multi-Device Cloud Sync",
                     subtitle = "Real-time sync, device identity & conflicts",
                     onClick = onNavigateToSync
+                )
+            }
+
+            item {
+                HorizontalDivider(modifier = Modifier.padding(vertical = spacing.small))
+                Text(
+                    text = "Excel Tools",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = spacing.medium, vertical = spacing.small)
+                )
+            }
+            item {
+                SettingsItem(
+                    icon = Icons.Default.FileDownload,
+                    title = "Export to Excel",
+                    subtitle = "Summary, tenants, payments, expenses & rooms",
+                    onClick = onNavigateToExcelExport
+                )
+            }
+            item {
+                SettingsItem(
+                    icon = Icons.Default.FileUpload,
+                    title = "Import from Excel",
+                    subtitle = "Import existing tenants from spreadsheet",
+                    onClick = onNavigateToExcelImport
                 )
             }
 

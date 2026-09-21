@@ -283,6 +283,9 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onAddTenantClick = {
                                     navController.navigate(Screen.AddTenant.route)
+                                },
+                                onImportExcelClick = {
+                                    navController.navigate(Screen.ExcelImport.route)
                                 }
                             )
                         }
@@ -390,7 +393,8 @@ class MainActivity : ComponentActivity() {
                                 onNavigateToRevenue = { navController.navigate(Screen.ReportsRevenue.route) },
                                 onNavigateToExpense = { navController.navigate(Screen.ReportsExpense.route) },
                                 onNavigateToOccupancy = { navController.navigate(Screen.ReportsOccupancy.route) },
-                                onNavigateToRent = { navController.navigate(Screen.ReportsRent.route) }
+                                onNavigateToRent = { navController.navigate(Screen.ReportsRent.route) },
+                                onNavigateToExcelExport = { navController.navigate(Screen.ExcelExport.route) }
                             )
                         }
 
@@ -486,7 +490,26 @@ class MainActivity : ComponentActivity() {
                                 onNavigateToNotifications = { navController.navigate(Screen.NotificationSettings.route) },
                                 onNavigateToBackup = { navController.navigate(Screen.BackupSettings.route) },
                                 onNavigateToSync = { navController.navigate(Screen.SyncSettings.route) },
+                                onNavigateToExcelExport = { navController.navigate(Screen.ExcelExport.route) },
+                                onNavigateToExcelImport = { navController.navigate(Screen.ExcelImport.route) },
                                 onNavigateToAbout = { navController.navigate(Screen.AboutSettings.route) }
+                            )
+                        }
+
+                        composable(route = Screen.ExcelExport.route) {
+                            com.example.features.excel.ui.ExcelExportScreen(
+                                onNavigateBack = { navController.popBackStack() }
+                            )
+                        }
+
+                        composable(route = Screen.ExcelImport.route) {
+                            com.example.features.excel.ui.ExcelImportScreen(
+                                onNavigateBack = { navController.popBackStack() },
+                                onNavigateToTenants = {
+                                    navController.navigate(Screen.Tenants.route) {
+                                        popUpTo(Screen.SettingsHome.route)
+                                    }
+                                }
                             )
                         }
 

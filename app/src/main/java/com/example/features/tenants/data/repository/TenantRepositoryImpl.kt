@@ -46,7 +46,9 @@ class TenantRepositoryImpl @Inject constructor(
     override suspend fun insertTenant(tenant: TenantEntity): Long {
         val currentPropId = currentPropertyManager.getCurrentPropertyId()
         val ownerId = try { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "" } catch (_: Exception) { "" }
+        val cloudId = if (tenant.cloudId.isNotBlank()) tenant.cloudId else "tenant_${java.util.UUID.randomUUID()}"
         val updated = tenant.copy(
+            cloudId = cloudId,
             propertyId = if (tenant.propertyId.isNotBlank() && tenant.propertyId != "property_default") tenant.propertyId else currentPropId,
             ownerId = if (tenant.ownerId.isNotBlank()) tenant.ownerId else ownerId,
             updatedAt = System.currentTimeMillis(),
@@ -60,7 +62,9 @@ class TenantRepositoryImpl @Inject constructor(
     override suspend fun updateTenant(tenant: TenantEntity) {
         val currentPropId = currentPropertyManager.getCurrentPropertyId()
         val ownerId = try { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "" } catch (_: Exception) { "" }
+        val cloudId = if (tenant.cloudId.isNotBlank()) tenant.cloudId else "tenant_${if (tenant.id > 0) tenant.id else java.util.UUID.randomUUID()}"
         val updated = tenant.copy(
+            cloudId = cloudId,
             propertyId = if (tenant.propertyId.isNotBlank() && tenant.propertyId != "property_default") tenant.propertyId else currentPropId,
             ownerId = if (tenant.ownerId.isNotBlank()) tenant.ownerId else ownerId,
             updatedAt = System.currentTimeMillis(),
@@ -93,7 +97,7 @@ class TenantRepositoryImpl @Inject constructor(
             syncStatus = "PENDING_UPLOAD"
         )
         roomDao.insertRoom(updated)
-        syncCoordinator?.enqueueOperation("ROOM", updated.roomNumber, "CREATE")
+        syncCoordinator?.enqueueOperation("ROOM", "${updated.propertyId}_${updated.roomNumber}", "CREATE")
     }
 
     override suspend fun getAllRooms(): List<RoomEntity> {
@@ -109,13 +113,45 @@ class TenantRepositoryImpl @Inject constructor(
 
     override suspend fun insertRentPayment(payment: RentPaymentEntity) {
         val currentPropId = currentPropertyManager.getCurrentPropertyId()
-        val updated = payment.copy(
-            propertyId = if (payment.propertyId.isNotBlank() && payment.propertyId != "property_default") payment.propertyId else currentPropId,
-            updatedAt = System.currentTimeMillis(),
-            syncStatus = "PENDING_UPLOAD"
-        )
-        rentPaymentDao.insertPayment(updated)
-        syncCoordinator?.enqueueOperation("PAYMENT", updated.id.toString(), "CREATE")
+        val ownerId = try { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "" } catch (_: Exception) { "" }
+
+        val existingPayment: RentPaymentEntity? = when {
+            payment.id > 0 -> rentPaymentDao.getPaymentByIdIncludingDeleted(payment.id)
+            payment.cloudId.isNotBlank() -> rentPaymentDao.getPaymentByCloudIdIncludingDeleted(payment.cloudId)
+            payment.tenantId > 0 && payment.billingMonth.isNotBlank() -> {
+                rentPaymentDao.getPaymentForTenantPropertyAndMonth(payment.tenantId, currentPropId, payment.billingMonth)
+                    ?: rentPaymentDao.getPaymentForTenantAndMonth(payment.tenantId, payment.billingMonth)
+            }
+            payment.tenantName.isNotBlank() && payment.billingMonth.isNotBlank() -> {
+                rentPaymentDao.getPaymentForTenantNamePropertyAndMonth(payment.tenantName, currentPropId, payment.billingMonth)
+            }
+            else -> null
+        }
+
+        if (existingPayment != null && !existingPayment.deleted) {
+            val updated = existingPayment.copy(
+                tenantName = payment.tenantName.ifBlank { existingPayment.tenantName },
+                roomNumber = payment.roomNumber.ifBlank { existingPayment.roomNumber },
+                amount = if (payment.amount > 0) payment.amount else existingPayment.amount,
+                propertyId = if (existingPayment.propertyId.isNotBlank() && existingPayment.propertyId != "property_default") existingPayment.propertyId else currentPropId,
+                ownerId = if (existingPayment.ownerId.isNotBlank()) existingPayment.ownerId else ownerId,
+                updatedAt = System.currentTimeMillis(),
+                syncStatus = "PENDING_UPLOAD"
+            )
+            rentPaymentDao.updatePayment(updated)
+            syncCoordinator?.enqueueOperation("PAYMENT", updated.id.toString(), "UPDATE")
+        } else {
+            val cloudId = if (payment.cloudId.isNotBlank()) payment.cloudId else "payment_${java.util.UUID.randomUUID()}"
+            val updated = payment.copy(
+                cloudId = cloudId,
+                propertyId = if (payment.propertyId.isNotBlank() && payment.propertyId != "property_default") payment.propertyId else currentPropId,
+                ownerId = if (payment.ownerId.isNotBlank()) payment.ownerId else ownerId,
+                updatedAt = System.currentTimeMillis(),
+                syncStatus = "PENDING_UPLOAD"
+            )
+            val insertedId = rentPaymentDao.insertPayment(updated)
+            syncCoordinator?.enqueueOperation("PAYMENT", insertedId.toString(), "CREATE")
+        }
     }
 
     override suspend fun deletePaymentsForTenant(tenantId: Int) {
