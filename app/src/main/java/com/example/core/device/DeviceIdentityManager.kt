@@ -64,6 +64,30 @@ class DeviceIdentityManager @Inject constructor(
     }
 
     /**
+     * Checks whether the initial cloud bootstrap has completed for this owner on this device.
+     */
+    fun isDeviceBootstrapCompleted(ownerId: String): Boolean {
+        if (ownerId.isBlank()) return false
+        return prefs.getBoolean(KEY_BOOTSTRAP_DONE_PREFIX + ownerId, false)
+    }
+
+    /**
+     * Persists the bootstrap completion state for this owner on this device.
+     */
+    fun setDeviceBootstrapCompleted(ownerId: String, completed: Boolean) {
+        if (ownerId.isBlank()) return
+        prefs.edit().putBoolean(KEY_BOOTSTRAP_DONE_PREFIX + ownerId, completed).apply()
+    }
+
+    /**
+     * Clears bootstrap state for an owner (e.g. during logout or account deletion).
+     */
+    fun clearDeviceBootstrap(ownerId: String) {
+        if (ownerId.isBlank()) return
+        prefs.edit().remove(KEY_BOOTSTRAP_DONE_PREFIX + ownerId).apply()
+    }
+
+    /**
      * Human-readable device model for diagnostics and conflict logs.
      */
     fun getDeviceName(): String {
@@ -76,5 +100,6 @@ class DeviceIdentityManager @Inject constructor(
         private const val PREFS_NAME = "pg_device_identity_prefs"
         private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_LAST_OWNER_ID = "last_active_owner_id"
+        private const val KEY_BOOTSTRAP_DONE_PREFIX = "bootstrap_completed_"
     }
 }

@@ -32,19 +32,20 @@ class ValidateTenantUseCase @Inject constructor() {
         if (name.isBlank()) {
             return TenantValidationResult.Error("Full Name is required.")
         }
-        if (phone.isBlank()) {
+        val cleanPhone = phone.filter { it.isDigit() }
+        if (cleanPhone.isBlank()) {
             return TenantValidationResult.Error("Mobile Number is required.")
         }
-        if (phone.length < 10) {
+        if (cleanPhone.length < 10) {
             return TenantValidationResult.Error("Mobile Number must be at least 10 digits.")
         }
-        if (emergencyContact.isBlank()) {
-            return TenantValidationResult.Error("Emergency Contact is required.")
+        if (emergencyContact.isNotBlank()) {
+            val cleanEmergency = emergencyContact.filter { it.isDigit() }
+            if (cleanEmergency.length < 10) {
+                return TenantValidationResult.Error("Emergency Contact must be at least 10 digits if provided.")
+            }
         }
-        if (emergencyContact.length < 10) {
-            return TenantValidationResult.Error("Emergency Contact must be at least 10 digits.")
-        }
-        if (email.isNotBlank() && !android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
+        if (email.isNotBlank() && !android.util.Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches()) {
             return TenantValidationResult.Error("Invalid Email format.")
         }
         if (roomNumber.isBlank()) {
@@ -90,77 +91,102 @@ class AddTenantUseCase @Inject constructor(
         companyOrCollege: String = "",
         notes: String = ""
     ): TenantValidationResult {
+        val trimmedRoom = roomNumber.trim()
+        val trimmedBed = bedId.trim()
+        val trimmedName = name.trim()
+        val trimmedPhone = phone.trim()
+
         val validation = validateTenantUseCase(
-            name, phone, emergencyContact, email, roomNumber, bedId,
+            trimmedName, trimmedPhone, emergencyContact, email, trimmedRoom, trimmedBed,
             monthlyRent, securityDeposit, advancePaid
         )
         if (validation is TenantValidationResult.Error) {
             return validation
         }
 
-        // Check if Room exists
-        val room = repository.getRoom(roomNumber)
-            ?: return TenantValidationResult.Error("Assigned Room $roomNumber does not exist.")
+        // Check if Room exists; auto-create if it doesn't so onboarding is never blocked
+        var room = repository.getRoom(trimmedRoom)
+        if (room == null) {
+            val propId = repository.getCurrentPropertyId()
+            val newRoom = RoomEntity(
+                roomNumber = trimmedRoom,
+                floor = "1st Floor",
+                capacity = maxOf(2, (trimmedBed.lastOrNull()?.let { if (it.isLetter()) (it.uppercaseChar() - 'A' + 1) else 2 } ?: 2)),
+                ratePerBed = monthlyRent,
+                roomType = "Standard",
+                propertyId = propId
+            )
+            repository.insertRoom(newRoom)
+            room = newRoom
+        }
 
         // Check room capacity constraints
-        val activeTenants = repository.getTenantsInRoom(roomNumber)
+        val activeTenants = repository.getTenantsInRoom(trimmedRoom).filter { !it.deleted && it.roomNumber.isNotBlank() }
         if (activeTenants.size >= room.capacity) {
-            return TenantValidationResult.Error("Room $roomNumber is already at full capacity (${room.capacity} beds).")
+            return TenantValidationResult.Error("Room $trimmedRoom is already at full capacity (${room.capacity} beds).")
         }
 
         // Check duplicate bed assignment
-        val isBedOccupied = activeTenants.any { it.bedId.equals(bedId, ignoreCase = true) }
+        val isBedOccupied = activeTenants.any { it.bedId.equals(trimmedBed, ignoreCase = true) }
         if (isBedOccupied) {
-            return TenantValidationResult.Error("$bedId in Room $roomNumber is already occupied.")
+            return TenantValidationResult.Error("$trimmedBed in Room $trimmedRoom is already occupied.")
         }
 
-        // Check for duplicate phone
+        // Check for duplicate phone against active tenants
+        val cleanPhone = trimmedPhone.filter { it.isDigit() }
         val allTenants = repository.getAllTenantsFlow().first()
-        if (allTenants.any { it.phone == phone && !it.roomNumber.isBlank() }) {
-            return TenantValidationResult.Error("A tenant with phone number $phone is already registered.")
+        if (allTenants.any { !it.deleted && !it.roomNumber.isBlank() && it.phone.filter { p -> p.isDigit() } == cleanPhone }) {
+            return TenantValidationResult.Error("A tenant with phone number $trimmedPhone is already registered.")
         }
 
         // Insert tenant
         val isKyc = kycDocType != "None" && kycDocType.isNotBlank()
+        val propId = repository.getCurrentPropertyId()
         val tenant = TenantEntity(
-            name = name,
-            phone = phone,
-            email = email,
-            emergencyContact = emergencyContact,
-            roomNumber = roomNumber,
-            bedId = bedId,
+            name = trimmedName,
+            phone = trimmedPhone,
+            email = email.trim(),
+            emergencyContact = emergencyContact.trim(),
+            roomNumber = trimmedRoom,
+            bedId = trimmedBed,
             monthlyRent = monthlyRent,
             securityDeposit = securityDeposit,
             moveInDate = moveInDate,
             isKycUploaded = isKyc,
             kycDocType = kycDocType,
-            alternateContact = alternateContact,
-            dob = dob,
+            alternateContact = alternateContact.trim(),
+            dob = dob.trim(),
             gender = gender,
-            address = address,
-            occupation = occupation,
-            companyOrCollege = companyOrCollege,
+            address = address.trim(),
+            occupation = occupation.trim(),
+            companyOrCollege = companyOrCollege.trim(),
             advancePaid = advancePaid,
-            notes = notes
+            notes = notes.trim(),
+            propertyId = propId
         )
         val newId = repository.insertTenant(tenant)
 
         // Auto-create initial rent payment
-        val currentDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-        val currentMonth = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date())
-        repository.insertRentPayment(
-            RentPaymentEntity(
-                tenantId = newId.toInt(),
-                tenantName = name,
-                roomNumber = roomNumber,
-                billingMonth = currentMonth,
-                amount = monthlyRent,
-                dueDate = currentDate,
-                paymentDate = null,
-                paymentMode = null,
-                status = "Pending"
+        try {
+            val currentDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+            val currentMonth = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date())
+            repository.insertRentPayment(
+                RentPaymentEntity(
+                    tenantId = newId.toInt(),
+                    tenantName = trimmedName,
+                    roomNumber = trimmedRoom,
+                    billingMonth = currentMonth,
+                    amount = monthlyRent,
+                    dueDate = currentDate,
+                    paymentDate = null,
+                    paymentMode = null,
+                    status = "Pending",
+                    propertyId = propId
+                )
             )
-        )
+        } catch (_: Exception) {
+            // Non-critical: Do not fail tenant creation if initial ledger item creation encounters error
+        }
 
         return TenantValidationResult.Success
     }

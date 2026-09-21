@@ -5,6 +5,7 @@ import com.example.data.database.ConflictRecordEntity
 import com.example.data.database.RoomEntity
 import com.example.data.database.TenantEntity
 import com.example.data.firestore.mapper.toDto
+import com.example.data.firestore.mapper.toEntity
 import com.example.data.firestore.model.RoomDto
 import com.example.data.firestore.model.TenantDto
 import com.example.data.sync.ConflictResolutionStrategy
@@ -260,5 +261,159 @@ class MultiDeviceSyncTest {
         val strategies = ConflictResolutionStrategy.values()
         assertTrue(strategies.contains(ConflictResolutionStrategy.KEEP_LOCAL))
         assertTrue(strategies.contains(ConflictResolutionStrategy.KEEP_REMOTE))
+    }
+
+    @Test
+    fun testK_identicalContent_doesNotCreateConflict() {
+        val localRoom = RoomEntity(
+            roomNumber = "102",
+            floor = "1st Floor",
+            capacity = 2,
+            ratePerBed = 5000.0,
+            roomType = "Non-AC",
+            notes = "Standard",
+            version = 1,
+            updatedAt = 1000L,
+            syncStatus = "PENDING_UPLOAD"
+        )
+        val remoteRoom = RoomDto(
+            id = "102",
+            ownerId = "owner_test",
+            roomNumber = "102",
+            floor = "1st Floor",
+            capacity = 2,
+            ratePerBed = 5000.0,
+            roomType = "Non-AC",
+            notes = "Standard",
+            version = 2,
+            updatedAt = 2000L,
+            lastModifiedByDeviceId = deviceA
+        )
+
+        val decision = conflictResolver.resolve(
+            localUpdatedAt = localRoom.updatedAt,
+            localVersion = localRoom.version,
+            localStatus = localRoom.syncStatus,
+            remoteUpdatedAt = remoteRoom.updatedAt,
+            remoteVersion = remoteRoom.version,
+            localData = localRoom,
+            remoteData = remoteRoom,
+            entityName = "Room 102",
+            remoteDeviceId = remoteRoom.lastModifiedByDeviceId,
+            localDeviceId = deviceB,
+            isContentIdentical = true
+        )
+
+        assertTrue("Identical content must be accepted as UseRemote and not create a conflict", decision is ConflictResult.UseRemote)
+    }
+
+    @Test
+    fun testL_selfEcho_doesNotCreateConflict() {
+        val localRoom = RoomEntity(
+            roomNumber = "103",
+            floor = "1st Floor",
+            capacity = 2,
+            ratePerBed = 5000.0,
+            version = 2,
+            updatedAt = 2000L,
+            syncStatus = "PENDING_UPLOAD"
+        )
+        val remoteEcho = RoomDto(
+            id = "103",
+            ownerId = "owner_test",
+            roomNumber = "103",
+            floor = "1st Floor",
+            capacity = 2,
+            ratePerBed = 5000.0,
+            version = 2,
+            updatedAt = 2000L,
+            lastModifiedByDeviceId = deviceA
+        )
+
+        val decision = conflictResolver.resolve(
+            localUpdatedAt = localRoom.updatedAt,
+            localVersion = localRoom.version,
+            localStatus = localRoom.syncStatus,
+            remoteUpdatedAt = remoteEcho.updatedAt,
+            remoteVersion = remoteEcho.version,
+            localData = localRoom,
+            remoteData = remoteEcho,
+            entityName = "Room 103",
+            remoteDeviceId = remoteEcho.lastModifiedByDeviceId,
+            localDeviceId = deviceA,
+            isContentIdentical = false
+        )
+
+        assertTrue("Self-echo must be accepted as UseRemote and not create a conflict", decision is ConflictResult.UseRemote)
+    }
+
+    @Test
+    fun testM_alreadyResolvedConflict_doesNotRecreateConflict() {
+        val localRoom = RoomEntity(
+            roomNumber = "104",
+            floor = "1st Floor",
+            capacity = 2,
+            ratePerBed = 6000.0,
+            version = 3,
+            updatedAt = 3000L,
+            syncStatus = "PENDING_UPLOAD"
+        )
+        val remoteRoom = RoomDto(
+            id = "104",
+            ownerId = "owner_test",
+            roomNumber = "104",
+            floor = "1st Floor",
+            capacity = 2,
+            ratePerBed = 5500.0,
+            version = 2,
+            updatedAt = 2500L,
+            lastModifiedByDeviceId = deviceA
+        )
+
+        val decision = conflictResolver.resolve(
+            localUpdatedAt = localRoom.updatedAt,
+            localVersion = localRoom.version,
+            localStatus = localRoom.syncStatus,
+            remoteUpdatedAt = remoteRoom.updatedAt,
+            remoteVersion = remoteRoom.version,
+            localData = localRoom,
+            remoteData = remoteRoom,
+            entityName = "Room 104",
+            remoteDeviceId = remoteRoom.lastModifiedByDeviceId,
+            localDeviceId = deviceB,
+            isContentIdentical = false,
+            isConflictAlreadyResolved = true
+        )
+
+        assertTrue("Previously resolved conflict must not be re-flagged", decision is ConflictResult.UseLocal)
+    }
+
+    @Test
+    fun testN_initialBootstrap_insertsFirestoreDataAsSyncedWithoutConflict() {
+        val remoteRoom = RoomDto(
+            id = "property_main_501",
+            ownerId = "owner_cloud",
+            roomNumber = "501",
+            floor = "5th Floor",
+            capacity = 2,
+            ratePerBed = 7500.0,
+            roomType = "AC",
+            version = 1,
+            syncStatus = "SYNCED",
+            lastModifiedByDeviceId = deviceA
+        )
+
+        val localEntity = remoteRoom.toEntity().copy(
+            ownerId = "owner_cloud",
+            syncStatus = "SYNCED",
+            version = remoteRoom.version,
+            updatedAt = remoteRoom.updatedAt
+        )
+
+        assertEquals("501", localEntity.roomNumber)
+        assertEquals("owner_cloud", localEntity.ownerId)
+        assertEquals("SYNCED", localEntity.syncStatus)
+        assertEquals(1, localEntity.version)
+        assertFalse(localEntity.deleted)
     }
 }

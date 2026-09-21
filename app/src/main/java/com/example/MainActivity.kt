@@ -121,7 +121,8 @@ class MainActivity : ComponentActivity() {
                                         if (profile != null && !profile?.pinCode.isNullOrBlank()) {
                                             Screen.PinLogin.route
                                         } else {
-                                            Screen.PinSetup.route
+                                            viewModel.unlockAppDirectly()
+                                            Screen.Dashboard.route
                                         }
                                     } else {
                                         Screen.Welcome.route
@@ -140,10 +141,25 @@ class MainActivity : ComponentActivity() {
                             val authState by authViewModel.authState.collectAsState()
                             
                             LaunchedEffect(authState) {
-                                if (authState is com.example.features.auth.ui.viewmodel.AuthState.Success) {
+                                val current = authState
+                                if (current is com.example.features.auth.ui.viewmodel.AuthState.Success) {
+                                    val isExisting = current.signInResult !is com.example.data.sync.SignInResult.NewAccount
                                     authViewModel.resetState()
-                                    navController.navigate(Screen.PinSetup.route) {
-                                        popUpTo(Screen.Welcome.route) { inclusive = true }
+                                    if (isExisting) {
+                                        if (profile != null && !profile?.pinCode.isNullOrBlank()) {
+                                            navController.navigate(Screen.PinLogin.route) {
+                                                popUpTo(Screen.Welcome.route) { inclusive = true }
+                                            }
+                                        } else {
+                                            viewModel.unlockAppDirectly()
+                                            navController.navigate(Screen.Dashboard.route) {
+                                                popUpTo(Screen.Welcome.route) { inclusive = true }
+                                            }
+                                        }
+                                    } else {
+                                        navController.navigate(Screen.PinSetup.route) {
+                                            popUpTo(Screen.Welcome.route) { inclusive = true }
+                                        }
                                     }
                                 }
                             }
@@ -163,9 +179,22 @@ class MainActivity : ComponentActivity() {
                             com.example.features.auth.ui.screens.AuthEmailScreen(
                                 viewModel = authViewModel,
                                 onNavigateBack = { navController.popBackStack() },
-                                onAuthSuccess = {
-                                    navController.navigate(Screen.PinSetup.route) {
-                                        popUpTo(Screen.Welcome.route) { inclusive = true }
+                                onAuthSuccess = { isExistingAccount ->
+                                    if (isExistingAccount) {
+                                        if (profile != null && !profile?.pinCode.isNullOrBlank()) {
+                                            navController.navigate(Screen.PinLogin.route) {
+                                                popUpTo(Screen.Welcome.route) { inclusive = true }
+                                            }
+                                        } else {
+                                            viewModel.unlockAppDirectly()
+                                            navController.navigate(Screen.Dashboard.route) {
+                                                popUpTo(Screen.Welcome.route) { inclusive = true }
+                                            }
+                                        }
+                                    } else {
+                                        navController.navigate(Screen.PinSetup.route) {
+                                            popUpTo(Screen.Welcome.route) { inclusive = true }
+                                        }
                                     }
                                 }
                             )

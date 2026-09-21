@@ -253,6 +253,17 @@ class AddTenantViewModel @Inject constructor(
         viewModelScope.launch {
             val roomsList = repository.getAllRooms()
             _uiState.update { it.copy(rooms = roomsList) }
+            if (roomsList.isNotEmpty() && _uiState.value.roomNumber.isBlank()) {
+                onRoomChanged(roomsList.first().roomNumber)
+            } else if (roomsList.isEmpty() && _uiState.value.roomNumber.isBlank()) {
+                _uiState.update {
+                    it.copy(
+                        roomNumber = "101",
+                        availableBeds = listOf("Bed A", "Bed B", "Bed C"),
+                        bedId = "Bed A"
+                    )
+                }
+            }
         }
     }
 
@@ -274,28 +285,37 @@ class AddTenantViewModel @Inject constructor(
     fun onKycDocTypeChanged(value: String) = _uiState.update { it.copy(kycDocType = value) }
 
     fun onRoomChanged(roomNo: String) {
+        val trimmedRoom = roomNo.trim()
         viewModelScope.launch {
-            val room = uiState.value.rooms.find { it.roomNumber == roomNo }
+            val room = uiState.value.rooms.find { it.roomNumber.equals(trimmedRoom, ignoreCase = true) }
+                ?: repository.getRoom(trimmedRoom)
             if (room != null) {
-                val activeTenants = repository.getTenantsInRoom(roomNo)
-                val occupiedBeds = activeTenants.map { it.bedId.lowercase() }
+                val activeTenants = repository.getTenantsInRoom(room.roomNumber).filter { !it.deleted && it.roomNumber.isNotBlank() }
+                val occupiedBeds = activeTenants.map { it.bedId.trim().lowercase() }
                 
                 // Generate beds Bed A, Bed B, etc.
-                val beds = (1..room.capacity).map { "Bed ${(64 + it).toChar()}" }
-                val available = beds.filter { !occupiedBeds.contains(it.lowercase()) }
+                val beds = (1..maxOf(room.capacity, 1)).map { "Bed ${(64 + it).toChar()}" }
+                val available = beds.filter { !occupiedBeds.contains(it.trim().lowercase()) }
+                val finalAvailable = if (available.isNotEmpty()) available else listOf("Bed A", "Bed B")
                 
                 _uiState.update { 
                     it.copy(
-                        roomNumber = roomNo,
-                        bedId = if (available.isNotEmpty()) available.first() else "",
-                        availableBeds = available,
-                        // Fill rate per bed automatically as default monthly rent
-                        monthlyRent = room.ratePerBed.toString(),
-                        securityDeposit = (room.ratePerBed).toString()
+                        roomNumber = room.roomNumber,
+                        bedId = if (available.isNotEmpty()) available.first() else "Bed A",
+                        availableBeds = finalAvailable,
+                        monthlyRent = if (it.monthlyRent.isBlank() && room.ratePerBed > 0) room.ratePerBed.toString() else it.monthlyRent,
+                        securityDeposit = if (it.securityDeposit.isBlank() && room.ratePerBed > 0) room.ratePerBed.toString() else it.securityDeposit
                     )
                 }
             } else {
-                _uiState.update { it.copy(roomNumber = roomNo, availableBeds = emptyList(), bedId = "") }
+                val defaultBeds = listOf("Bed A", "Bed B", "Bed C")
+                _uiState.update { 
+                    it.copy(
+                        roomNumber = trimmedRoom,
+                        availableBeds = defaultBeds,
+                        bedId = if (it.bedId.isBlank()) "Bed A" else it.bedId
+                    )
+                }
             }
         }
     }

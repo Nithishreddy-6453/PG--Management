@@ -39,10 +39,16 @@ class TenantRepositoryImpl @Inject constructor(
         return tenantDao.getTenantsInRoom(propId, roomNumber)
     }
 
+    override suspend fun getCurrentPropertyId(): String {
+        return currentPropertyManager.getCurrentPropertyId()
+    }
+
     override suspend fun insertTenant(tenant: TenantEntity): Long {
         val currentPropId = currentPropertyManager.getCurrentPropertyId()
+        val ownerId = try { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "" } catch (_: Exception) { "" }
         val updated = tenant.copy(
             propertyId = if (tenant.propertyId.isNotBlank() && tenant.propertyId != "property_default") tenant.propertyId else currentPropId,
+            ownerId = if (tenant.ownerId.isNotBlank()) tenant.ownerId else ownerId,
             updatedAt = System.currentTimeMillis(),
             syncStatus = "PENDING_UPLOAD"
         )
@@ -53,8 +59,10 @@ class TenantRepositoryImpl @Inject constructor(
 
     override suspend fun updateTenant(tenant: TenantEntity) {
         val currentPropId = currentPropertyManager.getCurrentPropertyId()
+        val ownerId = try { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "" } catch (_: Exception) { "" }
         val updated = tenant.copy(
             propertyId = if (tenant.propertyId.isNotBlank() && tenant.propertyId != "property_default") tenant.propertyId else currentPropId,
+            ownerId = if (tenant.ownerId.isNotBlank()) tenant.ownerId else ownerId,
             updatedAt = System.currentTimeMillis(),
             syncStatus = "PENDING_UPLOAD"
         )
@@ -70,7 +78,22 @@ class TenantRepositoryImpl @Inject constructor(
 
     override suspend fun getRoom(roomNumber: String): RoomEntity? {
         val propId = currentPropertyManager.getCurrentPropertyId()
-        return roomDao.getRoom(propId, roomNumber)
+        val room = roomDao.getRoom(propId, roomNumber)
+        if (room != null) return room
+        return roomDao.getRoom(roomNumber)
+    }
+
+    override suspend fun insertRoom(room: RoomEntity) {
+        val currentPropId = currentPropertyManager.getCurrentPropertyId()
+        val ownerId = try { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "" } catch (_: Exception) { "" }
+        val updated = room.copy(
+            propertyId = if (room.propertyId.isNotBlank() && room.propertyId != "property_default") room.propertyId else currentPropId,
+            ownerId = if (room.ownerId.isNotBlank()) room.ownerId else ownerId,
+            updatedAt = System.currentTimeMillis(),
+            syncStatus = "PENDING_UPLOAD"
+        )
+        roomDao.insertRoom(updated)
+        syncCoordinator?.enqueueOperation("ROOM", updated.roomNumber, "CREATE")
     }
 
     override suspend fun getAllRooms(): List<RoomEntity> {

@@ -18,6 +18,8 @@ interface TenantRepository {
     suspend fun getRoom(roomNumber: String): RoomEntity?
     suspend fun getAllRooms(): List<RoomEntity>
     fun getAllRoomsFlow(): Flow<List<RoomEntity>>
+    suspend fun insertRoom(room: RoomEntity)
+    suspend fun getCurrentPropertyId(): String
     
     // Rent payments for vacation and checkout lifecycle
     suspend fun insertRentPayment(payment: RentPaymentEntity)

@@ -48,6 +48,7 @@ class DashboardModuleTest {
     private lateinit var rentPaymentDao: RentPaymentDao
     private lateinit var expenseDao: ExpenseDao
     private lateinit var ownerProfileDao: OwnerProfileDao
+    private lateinit var currentPropertyManager: com.example.features.properties.data.CurrentPropertyManager
     private lateinit var repository: DashboardRepository
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -64,8 +65,9 @@ class DashboardModuleTest {
         rentPaymentDao = db.rentPaymentDao()
         expenseDao = db.expenseDao()
         ownerProfileDao = db.ownerProfileDao()
+        currentPropertyManager = com.example.features.properties.data.CurrentPropertyManager(context, db.propertyDao())
         
-        repository = DashboardRepository(roomDao, tenantDao, rentPaymentDao, expenseDao, ownerProfileDao)
+        repository = DashboardRepository(roomDao, tenantDao, rentPaymentDao, expenseDao, ownerProfileDao, currentPropertyManager)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)

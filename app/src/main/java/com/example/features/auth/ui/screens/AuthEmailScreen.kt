@@ -17,7 +17,7 @@ import com.example.features.auth.ui.viewmodel.AuthViewModel
 fun AuthEmailScreen(
     viewModel: AuthViewModel,
     onNavigateBack: () -> Unit,
-    onAuthSuccess: () -> Unit
+    onAuthSuccess: (isExistingAccount: Boolean) -> Unit
 ) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -26,9 +26,11 @@ fun AuthEmailScreen(
     val authState by viewModel.authState.collectAsState()
 
     LaunchedEffect(authState) {
-        if (authState is AuthState.Success) {
+        val current = authState
+        if (current is AuthState.Success) {
+            val isExisting = current.signInResult !is com.example.data.sync.SignInResult.NewAccount
             viewModel.resetState()
-            onAuthSuccess()
+            onAuthSuccess(isExisting)
         }
     }
 

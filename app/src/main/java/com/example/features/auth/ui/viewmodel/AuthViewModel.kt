@@ -2,6 +2,8 @@ package com.example.features.auth.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.sync.SignInResult
+import com.example.data.sync.SyncCoordinator
 import com.example.features.auth.domain.repository.FirebaseAuthRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,14 +15,14 @@ import javax.inject.Inject
 sealed class AuthState {
     object Idle : AuthState()
     object Loading : AuthState()
-    object Success : AuthState()
+    data class Success(val signInResult: SignInResult = SignInResult.AlreadyBootstrapped) : AuthState()
     data class Error(val message: String) : AuthState()
 }
 
 @HiltViewModel
 class AuthViewModel @Inject constructor(
     private val authRepository: FirebaseAuthRepository,
-    private val syncCoordinator: com.example.data.sync.SyncCoordinator? = null
+    private val syncCoordinator: SyncCoordinator? = null
 ) : ViewModel() {
     constructor(authRepository: FirebaseAuthRepository) : this(authRepository, null)
 
@@ -33,8 +35,8 @@ class AuthViewModel @Inject constructor(
             val result = authRepository.signInWithEmail(email, password)
             if (result.isSuccess) {
                 val uid = getCurrentUser()?.uid ?: "default_owner"
-                syncCoordinator?.handleUserSignIn(uid)
-                _authState.value = AuthState.Success
+                val signInResult = syncCoordinator?.handleUserSignIn(uid) ?: SignInResult.NewAccount
+                _authState.value = AuthState.Success(signInResult)
             } else {
                 _authState.value = AuthState.Error(result.exceptionOrNull()?.message ?: "Login failed")
             }
@@ -47,8 +49,8 @@ class AuthViewModel @Inject constructor(
             val result = authRepository.signUpWithEmail(email, password)
             if (result.isSuccess) {
                 val uid = getCurrentUser()?.uid ?: "default_owner"
-                syncCoordinator?.handleUserSignIn(uid)
-                _authState.value = AuthState.Success
+                val signInResult = syncCoordinator?.handleUserSignIn(uid) ?: SignInResult.NewAccount
+                _authState.value = AuthState.Success(signInResult)
             } else {
                 _authState.value = AuthState.Error(result.exceptionOrNull()?.message ?: "Sign up failed")
             }
@@ -63,8 +65,8 @@ class AuthViewModel @Inject constructor(
             if (result.isSuccess) {
                 android.util.Log.d("GoogleSignIn", "AuthViewModel signInWithGoogle SUCCESS!")
                 val uid = getCurrentUser()?.uid ?: "default_owner"
-                syncCoordinator?.handleUserSignIn(uid)
-                _authState.value = AuthState.Success
+                val signInResult = syncCoordinator?.handleUserSignIn(uid) ?: SignInResult.NewAccount
+                _authState.value = AuthState.Success(signInResult)
             } else {
                 val ex = result.exceptionOrNull()
                 android.util.Log.e("GoogleSignIn", "AuthViewModel signInWithGoogle FAILED: ${ex?.message}", ex)

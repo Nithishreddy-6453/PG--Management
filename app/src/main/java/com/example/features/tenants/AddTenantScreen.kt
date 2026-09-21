@@ -33,16 +33,29 @@ fun AddTenantScreen(
     val spacing = LocalSpacing.current
     val state by viewModel.uiState.collectAsState()
     val scrollState = rememberScrollState()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     var showGenderMenu by remember { mutableStateOf(false) }
     var showRoomMenu by remember { mutableStateOf(false) }
     var showBedMenu by remember { mutableStateOf(false) }
     var showKycMenu by remember { mutableStateOf(false) }
+    var isCustomRoom by remember { mutableStateOf(false) }
 
     // Trigger action on success
     LaunchedEffect(state.isSuccess) {
         if (state.isSuccess) {
             onBackClick()
+        }
+    }
+
+    // Show snackbar and scroll up on error
+    LaunchedEffect(state.error) {
+        state.error?.let { msg ->
+            scrollState.animateScrollTo(0)
+            snackbarHostState.showSnackbar(
+                message = msg,
+                duration = SnackbarDuration.Short
+            )
         }
     }
 
@@ -66,6 +79,7 @@ fun AddTenantScreen(
                 modifier = Modifier.testTag("add_tenant_top_bar")
             )
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         modifier = modifier.fillMaxSize().testTag("add_tenant_screen_container")
     ) { innerPadding ->
         Box(
@@ -164,7 +178,8 @@ fun AddTenantScreen(
                     OutlinedTextField(
                         value = state.emergencyContact,
                         onValueChange = { viewModel.onEmergencyContactChanged(it) },
-                        label = { Text("Emergency Contact *") },
+                        label = { Text("Emergency Contact") },
+                        placeholder = { Text("10-digit number") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                         modifier = Modifier.weight(1f).testTag("onboard_emergency_contact_input"),
                         singleLine = true
@@ -252,42 +267,59 @@ fun AddTenantScreen(
                 )
 
                 // CATEGORY 2: RENTAL SETUP & ALLOCATION
-                Text(
-                    text = "Rental Setup & Room Allocation",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(bottom = spacing.small)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = spacing.small),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Rental Setup & Room Allocation",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    if (state.rooms.isNotEmpty()) {
+                        TextButton(
+                            onClick = { isCustomRoom = !isCustomRoom },
+                            modifier = Modifier.testTag("toggle_custom_room_button")
+                        ) {
+                            Text(if (isCustomRoom) "Select from List" else "Custom Room")
+                        }
+                    }
+                }
 
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(bottom = spacing.small),
                     horizontalArrangement = Arrangement.spacedBy(spacing.small)
                 ) {
-                    // Room Assignment Dropdown
-                    ExposedDropdownMenuBox(
-                        expanded = showRoomMenu,
-                        onExpandedChange = { showRoomMenu = !showRoomMenu },
-                        modifier = Modifier.weight(1f)
-                    ) {
+                    // Room Assignment
+                    if (state.rooms.isEmpty() || isCustomRoom) {
                         OutlinedTextField(
-                            value = if (state.roomNumber.isBlank()) "Select Room" else "Room ${state.roomNumber}",
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Room Assignment *") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = showRoomMenu) },
-                            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth().testTag("onboard_room_dropdown")
+                            value = state.roomNumber,
+                            onValueChange = { viewModel.onRoomChanged(it) },
+                            label = { Text("Room No. *") },
+                            placeholder = { Text("e.g. 101") },
+                            modifier = Modifier.weight(1f).testTag("onboard_room_input"),
+                            singleLine = true
                         )
-                        ExposedDropdownMenu(
+                    } else {
+                        ExposedDropdownMenuBox(
                             expanded = showRoomMenu,
-                            onDismissRequest = { showRoomMenu = false }
+                            onExpandedChange = { showRoomMenu = !showRoomMenu },
+                            modifier = Modifier.weight(1f)
                         ) {
-                            if (state.rooms.isEmpty()) {
-                                DropdownMenuItem(
-                                    text = { Text("No rooms available") },
-                                    onClick = { showRoomMenu = false }
-                                )
-                            } else {
+                            OutlinedTextField(
+                                value = if (state.roomNumber.isBlank()) "Select Room" else "Room ${state.roomNumber}",
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("Room Assignment *") },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = showRoomMenu) },
+                                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth().testTag("onboard_room_dropdown")
+                            )
+                            ExposedDropdownMenu(
+                                expanded = showRoomMenu,
+                                onDismissRequest = { showRoomMenu = false }
+                            ) {
                                 state.rooms.forEach { room ->
                                     DropdownMenuItem(
                                         text = { Text("Room ${room.roomNumber} (${room.floor} - Capacity: ${room.capacity})") },
@@ -301,31 +333,35 @@ fun AddTenantScreen(
                         }
                     }
 
-                    // Bed Assignment Dropdown
-                    ExposedDropdownMenuBox(
-                        expanded = showBedMenu,
-                        onExpandedChange = { if (state.roomNumber.isNotBlank()) showBedMenu = !showBedMenu },
-                        modifier = Modifier.weight(1f)
-                    ) {
+                    // Bed Assignment
+                    if (state.availableBeds.isEmpty()) {
                         OutlinedTextField(
-                            value = if (state.bedId.isBlank()) "Select Bed" else state.bedId,
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Bed Assignment *") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = showBedMenu) },
-                            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth().testTag("onboard_bed_dropdown"),
-                            enabled = state.roomNumber.isNotBlank()
+                            value = state.bedId,
+                            onValueChange = { viewModel.onBedChanged(it) },
+                            label = { Text("Bed No. *") },
+                            placeholder = { Text("e.g. Bed A") },
+                            modifier = Modifier.weight(1f).testTag("onboard_bed_input"),
+                            singleLine = true
                         )
-                        ExposedDropdownMenu(
+                    } else {
+                        ExposedDropdownMenuBox(
                             expanded = showBedMenu,
-                            onDismissRequest = { showBedMenu = false }
+                            onExpandedChange = { if (state.roomNumber.isNotBlank()) showBedMenu = !showBedMenu },
+                            modifier = Modifier.weight(1f)
                         ) {
-                            if (state.availableBeds.isEmpty()) {
-                                DropdownMenuItem(
-                                    text = { Text("No vacant beds") },
-                                    onClick = { showBedMenu = false }
-                                )
-                            } else {
+                            OutlinedTextField(
+                                value = if (state.bedId.isBlank()) "Select Bed" else state.bedId,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("Bed Assignment *") },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = showBedMenu) },
+                                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth().testTag("onboard_bed_dropdown"),
+                                enabled = state.roomNumber.isNotBlank()
+                            )
+                            ExposedDropdownMenu(
+                                expanded = showBedMenu,
+                                onDismissRequest = { showBedMenu = false }
+                            ) {
                                 state.availableBeds.forEach { bed ->
                                     DropdownMenuItem(
                                         text = { Text(bed) },

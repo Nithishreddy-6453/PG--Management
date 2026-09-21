@@ -80,7 +80,7 @@ class RoomListViewModel @Inject constructor(
         )
     }.stateIn(
         scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
+        started = SharingStarted.Eagerly,
         initialValue = RoomFilterState()
     )
 
@@ -131,7 +131,7 @@ class RoomListViewModel @Inject constructor(
         }
     }.stateIn(
         scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
+        started = SharingStarted.Eagerly,
         initialValue = RoomListUiState.Loading
     )
 

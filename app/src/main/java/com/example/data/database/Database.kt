@@ -300,10 +300,10 @@ interface PropertyDao {
 
 @Dao
 interface RoomDao {
-    @Query("SELECT * FROM rooms WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL))) AND deleted = 0 ORDER BY floor ASC, roomNumber ASC")
+    @Query("SELECT * FROM rooms WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL)) OR (:propertyId = '' AND (propertyId = 'property_default' OR propertyId IS NULL))) AND deleted = 0 ORDER BY floor ASC, roomNumber ASC")
     fun getRoomsForPropertyFlow(propertyId: String): Flow<List<RoomEntity>>
 
-    @Query("SELECT * FROM rooms WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL))) AND deleted = 0 ORDER BY floor ASC, roomNumber ASC")
+    @Query("SELECT * FROM rooms WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL)) OR (:propertyId = '' AND (propertyId = 'property_default' OR propertyId IS NULL))) AND deleted = 0 ORDER BY floor ASC, roomNumber ASC")
     suspend fun getAllRooms(propertyId: String): List<RoomEntity>
 
     @Query("SELECT * FROM rooms WHERE deleted = 0 ORDER BY floor ASC, roomNumber ASC")
@@ -315,13 +315,13 @@ interface RoomDao {
     @Query("SELECT * FROM rooms ORDER BY floor ASC, roomNumber ASC")
     suspend fun getAllRoomsIncludingDeleted(): List<RoomEntity>
 
-    @Query("SELECT * FROM rooms WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL))) AND deleted = 0 AND roomNumber = :roomNumber LIMIT 1")
+    @Query("SELECT * FROM rooms WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL)) OR (:propertyId = '' AND (propertyId = 'property_default' OR propertyId IS NULL))) AND deleted = 0 AND roomNumber = :roomNumber LIMIT 1")
     fun getRoomFlow(propertyId: String, roomNumber: String): Flow<RoomEntity?>
 
     @Query("SELECT * FROM rooms WHERE deleted = 0 AND roomNumber = :roomNumber LIMIT 1")
     fun getRoomFlow(roomNumber: String): Flow<RoomEntity?>
 
-    @Query("SELECT * FROM rooms WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL))) AND deleted = 0 AND roomNumber = :roomNumber LIMIT 1")
+    @Query("SELECT * FROM rooms WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL)) OR (:propertyId = '' AND (propertyId = 'property_default' OR propertyId IS NULL))) AND deleted = 0 AND roomNumber = :roomNumber LIMIT 1")
     suspend fun getRoom(propertyId: String, roomNumber: String): RoomEntity?
 
     @Query("SELECT * FROM rooms WHERE deleted = 0 AND roomNumber = :roomNumber LIMIT 1")
@@ -339,13 +339,13 @@ interface RoomDao {
     @Query("DELETE FROM rooms WHERE roomNumber = :roomNumber")
     suspend fun hardDeleteRoom(roomNumber: String)
 
-    @Query("DELETE FROM rooms WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL))) AND roomNumber = :roomNumber")
+    @Query("DELETE FROM rooms WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL)) OR (:propertyId = '' AND (propertyId = 'property_default' OR propertyId IS NULL))) AND roomNumber = :roomNumber")
     suspend fun hardDeleteRoom(propertyId: String, roomNumber: String)
 
     @Query("UPDATE rooms SET deleted = 1, syncStatus = 'PENDING_UPLOAD', updatedAt = :timestamp WHERE roomNumber = :roomNumber")
     suspend fun softDeleteRoom(roomNumber: String, timestamp: Long = System.currentTimeMillis())
 
-    @Query("UPDATE rooms SET deleted = 1, syncStatus = 'PENDING_UPLOAD', updatedAt = :timestamp WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL))) AND roomNumber = :roomNumber")
+    @Query("UPDATE rooms SET deleted = 1, syncStatus = 'PENDING_UPLOAD', updatedAt = :timestamp WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL)) OR (:propertyId = '' AND (propertyId = 'property_default' OR propertyId IS NULL))) AND roomNumber = :roomNumber")
     suspend fun softDeleteRoom(propertyId: String, roomNumber: String, timestamp: Long = System.currentTimeMillis())
 
     @Query("DELETE FROM rooms")
@@ -354,10 +354,10 @@ interface RoomDao {
 
 @Dao
 interface TenantDao {
-    @Query("SELECT * FROM tenants WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL))) AND deleted = 0 ORDER BY name ASC")
+    @Query("SELECT * FROM tenants WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL)) OR (:propertyId = '' AND (propertyId = 'property_default' OR propertyId IS NULL))) AND deleted = 0 ORDER BY name ASC")
     fun getAllTenantsForPropertyFlow(propertyId: String): Flow<List<TenantEntity>>
 
-    @Query("SELECT * FROM tenants WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL))) AND deleted = 0 ORDER BY name ASC")
+    @Query("SELECT * FROM tenants WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL)) OR (:propertyId = '' AND (propertyId = 'property_default' OR propertyId IS NULL))) AND deleted = 0 ORDER BY name ASC")
     suspend fun getAllTenants(propertyId: String): List<TenantEntity>
 
     @Query("SELECT * FROM tenants WHERE deleted = 0 ORDER BY name ASC")
@@ -375,13 +375,13 @@ interface TenantDao {
     @Query("SELECT * FROM tenants WHERE id = :id")
     suspend fun getTenantByIdIncludingDeleted(id: Int): TenantEntity?
 
-    @Query("SELECT * FROM tenants WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL))) AND deleted = 0 AND roomNumber = :roomNumber")
+    @Query("SELECT * FROM tenants WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL)) OR (:propertyId = '' AND (propertyId = 'property_default' OR propertyId IS NULL))) AND deleted = 0 AND roomNumber = :roomNumber")
     fun getTenantsInRoomForPropertyFlow(propertyId: String, roomNumber: String): Flow<List<TenantEntity>>
 
     @Query("SELECT * FROM tenants WHERE deleted = 0 AND roomNumber = :roomNumber")
     fun getTenantsInRoomFlow(roomNumber: String): Flow<List<TenantEntity>>
 
-    @Query("SELECT * FROM tenants WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL))) AND deleted = 0 AND roomNumber = :roomNumber")
+    @Query("SELECT * FROM tenants WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL)) OR (:propertyId = '' AND (propertyId = 'property_default' OR propertyId IS NULL))) AND deleted = 0 AND roomNumber = :roomNumber")
     suspend fun getTenantsInRoom(propertyId: String, roomNumber: String): List<TenantEntity>
 
     @Query("SELECT * FROM tenants WHERE deleted = 0 AND roomNumber = :roomNumber")
@@ -561,8 +561,14 @@ interface ConflictRecordDao {
     @Query("SELECT * FROM conflict_records WHERE entityType = :entityType AND entityId = :entityId AND status = 'CONFLICT' LIMIT 1")
     suspend fun getConflictForEntity(entityType: String, entityId: String): ConflictRecordEntity?
 
+    @Query("SELECT * FROM conflict_records WHERE entityType = :entityType AND entityId = :entityId AND status = 'RESOLVED' ORDER BY resolvedAt DESC LIMIT 1")
+    suspend fun getResolvedConflictForEntity(entityType: String, entityId: String): ConflictRecordEntity?
+
     @Query("DELETE FROM conflict_records WHERE id = :id")
     suspend fun deleteConflict(id: String)
+
+    @Query("DELETE FROM conflict_records WHERE entityType = :entityType AND entityId = :entityId")
+    suspend fun deleteConflictsForEntity(entityType: String, entityId: String)
 
     @Query("DELETE FROM conflict_records")
     suspend fun clearAll()
@@ -572,100 +578,179 @@ interface ConflictRecordDao {
 // 3. DATABASE CONTAINER & MIGRATIONS
 // ==========================================
 
-val MIGRATION_6_7 = object : Migration(6, 7) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        // 1. Create properties table
+private fun performFullSchemaUpgradeToV8(db: SupportSQLiteDatabase) {
+    // 1. Create properties table if not exists
+    db.execSQL("""
+        CREATE TABLE IF NOT EXISTS properties (
+            propertyId TEXT NOT NULL PRIMARY KEY,
+            ownerId TEXT NOT NULL,
+            propertyName TEXT NOT NULL,
+            address TEXT NOT NULL,
+            city TEXT NOT NULL,
+            state TEXT NOT NULL,
+            postalCode TEXT NOT NULL,
+            contactNumber TEXT NOT NULL,
+            description TEXT NOT NULL,
+            createdAt INTEGER NOT NULL,
+            updatedAt INTEGER NOT NULL,
+            isActive INTEGER NOT NULL,
+            version INTEGER NOT NULL,
+            deleted INTEGER NOT NULL,
+            syncStatus TEXT NOT NULL,
+            lastSyncedAt INTEGER NOT NULL,
+            lastModifiedByDeviceId TEXT NOT NULL
+        )
+    """.trimIndent())
+
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_properties_ownerId ON properties(ownerId)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_properties_ownerId_propertyId ON properties(ownerId, propertyId)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_properties_ownerId_isActive ON properties(ownerId, isActive)")
+
+    // 2. Insert Default Property
+    db.execSQL("""
+        INSERT OR IGNORE INTO properties (
+            propertyId, ownerId, propertyName, address, city, state, postalCode, contactNumber,
+            description, createdAt, updatedAt, isActive, version, deleted, syncStatus, lastSyncedAt, lastModifiedByDeviceId
+        ) VALUES (
+            'property_default', '', 'Emerald Stays', 'Main Road, Near Tech Park', 'Bangalore', 'Karnataka', '560001',
+            '+91 98765 43210', 'Primary PG Facility with modern amenities', 1773792000000, 1773792000000, 1, 1, 0, 'LOCAL_ONLY', 0, ''
+        )
+    """.trimIndent())
+
+    // 3. Recreate rooms table with composite primary key (propertyId, roomNumber)
+    // First ensure old rooms table has columns added so SELECT never throws column not found
+    try {
+        db.execSQL("ALTER TABLE rooms ADD COLUMN propertyId TEXT NOT NULL DEFAULT 'property_default'")
+    } catch (_: Exception) {}
+    try {
+        db.execSQL("ALTER TABLE rooms ADD COLUMN lastModifiedByDeviceId TEXT NOT NULL DEFAULT ''")
+    } catch (_: Exception) {}
+
+    db.execSQL("DROP TABLE IF EXISTS rooms_temp")
+    db.execSQL("""
+        CREATE TABLE rooms_temp (
+            roomNumber TEXT NOT NULL,
+            floor TEXT NOT NULL,
+            capacity INTEGER NOT NULL,
+            ratePerBed REAL NOT NULL,
+            roomType TEXT NOT NULL,
+            notes TEXT NOT NULL,
+            ownerId TEXT NOT NULL,
+            propertyId TEXT NOT NULL,
+            createdAt INTEGER NOT NULL,
+            updatedAt INTEGER NOT NULL,
+            version INTEGER NOT NULL,
+            deleted INTEGER NOT NULL,
+            syncStatus TEXT NOT NULL,
+            lastSyncedAt INTEGER NOT NULL,
+            lastModifiedByDeviceId TEXT NOT NULL,
+            PRIMARY KEY(propertyId, roomNumber)
+        )
+    """.trimIndent())
+
+    try {
         db.execSQL("""
-            CREATE TABLE IF NOT EXISTS properties (
-                propertyId TEXT NOT NULL PRIMARY KEY,
-                ownerId TEXT NOT NULL,
-                propertyName TEXT NOT NULL,
-                address TEXT NOT NULL,
-                city TEXT NOT NULL,
-                state TEXT NOT NULL,
-                postalCode TEXT NOT NULL,
-                contactNumber TEXT NOT NULL,
-                description TEXT NOT NULL,
-                createdAt INTEGER NOT NULL,
-                updatedAt INTEGER NOT NULL,
-                isActive INTEGER NOT NULL,
-                version INTEGER NOT NULL,
-                deleted INTEGER NOT NULL,
-                syncStatus TEXT NOT NULL,
-                lastSyncedAt INTEGER NOT NULL,
-                lastModifiedByDeviceId TEXT NOT NULL
+            INSERT OR REPLACE INTO rooms_temp (
+                roomNumber, floor, capacity, ratePerBed, roomType, notes,
+                ownerId, propertyId, createdAt, updatedAt, version, deleted,
+                syncStatus, lastSyncedAt, lastModifiedByDeviceId
             )
+            SELECT 
+                roomNumber,
+                COALESCE(floor, 'Ground'),
+                COALESCE(capacity, 1),
+                COALESCE(ratePerBed, 0.0),
+                COALESCE(roomType, 'AC'),
+                COALESCE(notes, ''),
+                COALESCE(ownerId, ''),
+                COALESCE(propertyId, 'property_default'),
+                COALESCE(createdAt, CAST(strftime('%s','now') AS INTEGER) * 1000),
+                COALESCE(updatedAt, CAST(strftime('%s','now') AS INTEGER) * 1000),
+                COALESCE(version, 1),
+                COALESCE(deleted, 0),
+                COALESCE(syncStatus, 'LOCAL_ONLY'),
+                COALESCE(lastSyncedAt, 0),
+                COALESCE(lastModifiedByDeviceId, '')
+            FROM rooms
         """.trimIndent())
+    } catch (_: Exception) {}
 
-        db.execSQL("CREATE INDEX IF NOT EXISTS index_properties_ownerId ON properties(ownerId)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS index_properties_ownerId_propertyId ON properties(ownerId, propertyId)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS index_properties_ownerId_isActive ON properties(ownerId, isActive)")
+    db.execSQL("DROP TABLE IF EXISTS rooms")
+    db.execSQL("ALTER TABLE rooms_temp RENAME TO rooms")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_rooms_ownerId ON rooms(ownerId)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_rooms_ownerId_propertyId ON rooms(ownerId, propertyId)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_rooms_propertyId_roomNumber ON rooms(propertyId, roomNumber)")
 
-        // 2. Insert Default Property
-        db.execSQL("""
-            INSERT OR IGNORE INTO properties (
-                propertyId, ownerId, propertyName, address, city, state, postalCode, contactNumber,
-                description, createdAt, updatedAt, isActive, version, deleted, syncStatus, lastSyncedAt, lastModifiedByDeviceId
-            ) VALUES (
-                'property_default', '', 'Emerald Stays', 'Main Road, Near Tech Park', 'Bangalore', 'Karnataka', '560001',
-                '+91 98765 43210', 'Primary PG Facility with modern amenities', 1773792000000, 1773792000000, 1, 1, 0, 'LOCAL_ONLY', 0, ''
-            )
-        """.trimIndent())
+    // 4. Tenants
+    try {
+        db.execSQL("ALTER TABLE tenants ADD COLUMN propertyId TEXT NOT NULL DEFAULT 'property_default'")
+    } catch (_: Exception) {}
+    try {
+        db.execSQL("ALTER TABLE tenants ADD COLUMN lastModifiedByDeviceId TEXT NOT NULL DEFAULT ''")
+    } catch (_: Exception) {}
+    db.execSQL("UPDATE tenants SET propertyId = 'property_default' WHERE propertyId IS NULL OR propertyId = ''")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_tenants_ownerId ON tenants(ownerId)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_tenants_ownerId_propertyId ON tenants(ownerId, propertyId)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_tenants_propertyId_roomNumber ON tenants(propertyId, roomNumber)")
 
-        // 3. Alter tables to add propertyId if not present
-        try {
-            db.execSQL("ALTER TABLE rooms ADD COLUMN propertyId TEXT NOT NULL DEFAULT 'property_default'")
-        } catch (_: Exception) {}
-        try {
-            db.execSQL("ALTER TABLE rooms ADD COLUMN lastModifiedByDeviceId TEXT NOT NULL DEFAULT ''")
-        } catch (_: Exception) {}
+    // 5. Payments
+    try {
+        db.execSQL("ALTER TABLE payments ADD COLUMN propertyId TEXT NOT NULL DEFAULT 'property_default'")
+    } catch (_: Exception) {}
+    try {
+        db.execSQL("ALTER TABLE payments ADD COLUMN lastModifiedByDeviceId TEXT NOT NULL DEFAULT ''")
+    } catch (_: Exception) {}
+    db.execSQL("UPDATE payments SET propertyId = 'property_default' WHERE propertyId IS NULL OR propertyId = ''")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_payments_ownerId ON payments(ownerId)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_payments_ownerId_propertyId ON payments(ownerId, propertyId)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_payments_propertyId_tenantId ON payments(propertyId, tenantId)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_payments_propertyId_dueDate ON payments(propertyId, dueDate)")
 
-        try {
-            db.execSQL("ALTER TABLE tenants ADD COLUMN propertyId TEXT NOT NULL DEFAULT 'property_default'")
-        } catch (_: Exception) {}
-        try {
-            db.execSQL("ALTER TABLE tenants ADD COLUMN lastModifiedByDeviceId TEXT NOT NULL DEFAULT ''")
-        } catch (_: Exception) {}
+    // 6. Expenses
+    try {
+        db.execSQL("ALTER TABLE expenses ADD COLUMN propertyId TEXT NOT NULL DEFAULT 'property_default'")
+    } catch (_: Exception) {}
+    try {
+        db.execSQL("ALTER TABLE expenses ADD COLUMN lastModifiedByDeviceId TEXT NOT NULL DEFAULT ''")
+    } catch (_: Exception) {}
+    db.execSQL("UPDATE expenses SET propertyId = 'property_default' WHERE propertyId IS NULL OR propertyId = ''")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_expenses_ownerId ON expenses(ownerId)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_expenses_ownerId_propertyId ON expenses(ownerId, propertyId)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_expenses_propertyId_date ON expenses(propertyId, date)")
 
-        try {
-            db.execSQL("ALTER TABLE payments ADD COLUMN propertyId TEXT NOT NULL DEFAULT 'property_default'")
-        } catch (_: Exception) {}
-        try {
-            db.execSQL("ALTER TABLE payments ADD COLUMN lastModifiedByDeviceId TEXT NOT NULL DEFAULT ''")
-        } catch (_: Exception) {}
+    // 7. Owner Profile
+    try {
+        db.execSQL("ALTER TABLE owner_profile ADD COLUMN propertyId TEXT NOT NULL DEFAULT 'property_default'")
+    } catch (_: Exception) {}
+    try {
+        db.execSQL("ALTER TABLE owner_profile ADD COLUMN lastModifiedByDeviceId TEXT NOT NULL DEFAULT ''")
+    } catch (_: Exception) {}
+    db.execSQL("UPDATE owner_profile SET propertyId = 'property_default' WHERE propertyId IS NULL OR propertyId = ''")
 
-        try {
-            db.execSQL("ALTER TABLE expenses ADD COLUMN propertyId TEXT NOT NULL DEFAULT 'property_default'")
-        } catch (_: Exception) {}
-        try {
-            db.execSQL("ALTER TABLE expenses ADD COLUMN lastModifiedByDeviceId TEXT NOT NULL DEFAULT ''")
-        } catch (_: Exception) {}
+    // 8. Sync Queue
+    try {
+        db.execSQL("ALTER TABLE sync_queue ADD COLUMN ownerId TEXT NOT NULL DEFAULT ''")
+    } catch (_: Exception) {}
+    try {
+        db.execSQL("ALTER TABLE sync_queue ADD COLUMN propertyId TEXT NOT NULL DEFAULT ''")
+    } catch (_: Exception) {}
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_sync_queue_status ON sync_queue(status)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_sync_queue_propertyId ON sync_queue(propertyId)")
 
-        try {
-            db.execSQL("ALTER TABLE owner_profile ADD COLUMN propertyId TEXT NOT NULL DEFAULT 'property_default'")
-        } catch (_: Exception) {}
-        try {
-            db.execSQL("ALTER TABLE owner_profile ADD COLUMN lastModifiedByDeviceId TEXT NOT NULL DEFAULT ''")
-        } catch (_: Exception) {}
-
-        try {
-            db.execSQL("ALTER TABLE sync_queue ADD COLUMN ownerId TEXT NOT NULL DEFAULT ''")
-        } catch (_: Exception) {}
-        try {
-            db.execSQL("ALTER TABLE sync_queue ADD COLUMN propertyId TEXT NOT NULL DEFAULT ''")
-        } catch (_: Exception) {}
-
-        try {
-            db.execSQL("ALTER TABLE conflict_records ADD COLUMN propertyId TEXT NOT NULL DEFAULT ''")
-        } catch (_: Exception) {}
-
-        // 4. Update any existing records to property_default
-        db.execSQL("UPDATE rooms SET propertyId = 'property_default' WHERE propertyId IS NULL OR propertyId = ''")
-        db.execSQL("UPDATE tenants SET propertyId = 'property_default' WHERE propertyId IS NULL OR propertyId = ''")
-        db.execSQL("UPDATE payments SET propertyId = 'property_default' WHERE propertyId IS NULL OR propertyId = ''")
-        db.execSQL("UPDATE expenses SET propertyId = 'property_default' WHERE propertyId IS NULL OR propertyId = ''")
-    }
+    // 9. Conflict records
+    try {
+        db.execSQL("ALTER TABLE conflict_records ADD COLUMN propertyId TEXT NOT NULL DEFAULT ''")
+    } catch (_: Exception) {}
 }
+
+val MIGRATION_1_8 = object : Migration(1, 8) { override fun migrate(db: SupportSQLiteDatabase) { performFullSchemaUpgradeToV8(db) } }
+val MIGRATION_2_8 = object : Migration(2, 8) { override fun migrate(db: SupportSQLiteDatabase) { performFullSchemaUpgradeToV8(db) } }
+val MIGRATION_3_8 = object : Migration(3, 8) { override fun migrate(db: SupportSQLiteDatabase) { performFullSchemaUpgradeToV8(db) } }
+val MIGRATION_4_8 = object : Migration(4, 8) { override fun migrate(db: SupportSQLiteDatabase) { performFullSchemaUpgradeToV8(db) } }
+val MIGRATION_5_8 = object : Migration(5, 8) { override fun migrate(db: SupportSQLiteDatabase) { performFullSchemaUpgradeToV8(db) } }
+val MIGRATION_6_8 = object : Migration(6, 8) { override fun migrate(db: SupportSQLiteDatabase) { performFullSchemaUpgradeToV8(db) } }
+val MIGRATION_7_8 = object : Migration(7, 8) { override fun migrate(db: SupportSQLiteDatabase) { performFullSchemaUpgradeToV8(db) } }
+val MIGRATION_6_7 = object : Migration(6, 7) { override fun migrate(db: SupportSQLiteDatabase) { performFullSchemaUpgradeToV8(db) } }
 
 @Database(
     entities = [
@@ -678,7 +763,7 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
         SyncOperationEntity::class,
         ConflictRecordEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -713,8 +798,17 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "pg_manager_database"
                 )
-                .addMigrations(MIGRATION_6_7)
-                .fallbackToDestructiveMigration(dropAllTables = false)
+                .addMigrations(
+                    MIGRATION_1_8,
+                    MIGRATION_2_8,
+                    MIGRATION_3_8,
+                    MIGRATION_4_8,
+                    MIGRATION_5_8,
+                    MIGRATION_6_8,
+                    MIGRATION_7_8,
+                    MIGRATION_6_7
+                )
+                .fallbackToDestructiveMigration(dropAllTables = true)
                 .addCallback(DatabaseCallback(context))
                 .build()
                 INSTANCE = instance

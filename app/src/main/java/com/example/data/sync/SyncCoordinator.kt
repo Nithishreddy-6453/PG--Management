@@ -13,6 +13,12 @@ import kotlinx.coroutines.flow.combine
 import javax.inject.Inject
 import javax.inject.Singleton
 
+sealed class SignInResult {
+    object ExistingAccountBootstrapped : SignInResult()
+    object NewAccount : SignInResult()
+    object AlreadyBootstrapped : SignInResult()
+}
+
 @Singleton
 class SyncCoordinator @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -65,6 +71,11 @@ class SyncCoordinator @Inject constructor(
             logger.i(TAG, "Skipping immediate sync: User is not authenticated")
             return
         }
+        val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+        if (!uid.isNullOrBlank() && !deviceIdentityManager.isDeviceBootstrapCompleted(uid)) {
+            logger.w(TAG, "Skipping immediate sync: Initial bootstrap has not completed for UID $uid")
+            return
+        }
         try {
             SyncWorker.enqueueImmediateSync(context)
         } catch (e: Exception) {
@@ -91,23 +102,57 @@ class SyncCoordinator @Inject constructor(
         }
     }
 
-    suspend fun handleUserSignIn(newOwnerId: String) {
-        logger.i(TAG, "User signed in: $newOwnerId")
+    suspend fun handleUserSignIn(newOwnerId: String): SignInResult {
+        logger.i(TAG, "Handling sign in for user: $newOwnerId")
         val previousOwner = deviceIdentityManager.getLastActiveOwnerId()
         if (!previousOwner.isNullOrBlank() && previousOwner != newOwnerId) {
             logger.i(TAG, "Different account detected (old: $previousOwner, new: $newOwnerId). Purging local data.")
             syncEngine.clearLocalUserData()
+            deviceIdentityManager.clearDeviceBootstrap(previousOwner)
         }
         deviceIdentityManager.setLastActiveOwnerId(newOwnerId)
-        realtimeSyncManager.startListening(newOwnerId)
-        initializePeriodicSync()
-        triggerImmediateSync()
+
+        val isBootstrapped = deviceIdentityManager.isDeviceBootstrapCompleted(newOwnerId)
+        if (!isBootstrapped) {
+            // Check if cloud data exists for this Firebase UID
+            val hasCloudData = syncEngine.hasCloudData(newOwnerId)
+            if (hasCloudData) {
+                logger.i(TAG, "Existing account detected on new device for UID: $newOwnerId. Starting initial cloud bootstrap.")
+                val bootstrapResult = syncEngine.performInitialCloudBootstrap(newOwnerId)
+                if (bootstrapResult is PgResult.Success) {
+                    logger.i(TAG, "Initial bootstrap complete. Enabling real-time and periodic sync.")
+                    realtimeSyncManager.startListening(newOwnerId)
+                    initializePeriodicSync()
+                    return SignInResult.ExistingAccountBootstrapped
+                } else {
+                    logger.e(TAG, "Initial bootstrap encountered error: ${(bootstrapResult as PgResult.Failure).error.message}")
+                    realtimeSyncManager.startListening(newOwnerId)
+                    initializePeriodicSync()
+                    return SignInResult.ExistingAccountBootstrapped
+                }
+            } else {
+                logger.i(TAG, "No existing cloud data found for UID: $newOwnerId. Treating as new account.")
+                deviceIdentityManager.setDeviceBootstrapCompleted(newOwnerId, true)
+                syncEngine.clearLocalUserData()
+                return SignInResult.NewAccount
+            }
+        } else {
+            logger.i(TAG, "Device already bootstrapped for UID: $newOwnerId. Resuming normal sync.")
+            realtimeSyncManager.startListening(newOwnerId)
+            initializePeriodicSync()
+            triggerImmediateSync()
+            return SignInResult.AlreadyBootstrapped
+        }
     }
 
     suspend fun handleUserSignOut() {
+        val lastOwner = deviceIdentityManager.getLastActiveOwnerId()
         logger.i(TAG, "User signed out. Purging session and local data.")
         realtimeSyncManager.stopListening()
         cancelPeriodicSync()
+        if (!lastOwner.isNullOrBlank()) {
+            deviceIdentityManager.clearDeviceBootstrap(lastOwner)
+        }
         deviceIdentityManager.setLastActiveOwnerId(null)
         syncEngine.clearLocalUserData()
     }
@@ -124,6 +169,7 @@ class SyncCoordinator @Inject constructor(
     fun cancelPeriodicSync() {
         try {
             SyncWorker.cancelAllSyncWork(context)
+            InitialBootstrapWorker.cancel(context)
             logger.i(TAG, "Background sync cancelled")
         } catch (e: Exception) {
             logger.w(TAG, "Failed cancelling background sync: ${e.message}")

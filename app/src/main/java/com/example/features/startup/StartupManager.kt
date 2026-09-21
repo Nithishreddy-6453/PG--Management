@@ -54,13 +54,17 @@ class StartupManager @Inject constructor(
                 _state.value = StartupState.Initializing(0.1f, "Initializing Logger...")
                 delay(150) // Simulate fast initialization step
                 
-                _state.value = StartupState.Initializing(0.4f, "Verifying Preferences & Security PIN...")
-                delay(200)
-                
-                _state.value = StartupState.Initializing(0.7f, "Warming up SQLite connections...")
-                syncCoordinator?.initializePeriodicSync()
-                syncCoordinator?.triggerImmediateSync()
-                delay(250)
+                _state.value = StartupState.Initializing(0.4f, "Verifying Session & Sync...")
+                val uid = try {
+                    com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+                } catch (e: Exception) {
+                    null
+                }
+                if (!uid.isNullOrBlank() && syncCoordinator != null) {
+                    _state.value = StartupState.Initializing(0.6f, "Checking cloud account data...")
+                    syncCoordinator.handleUserSignIn(uid)
+                }
+                delay(150)
                 
                 _state.value = StartupState.Initializing(1.0f, "System ready.")
                 logger.i(TAG, "Bootstrap completed successfully.")

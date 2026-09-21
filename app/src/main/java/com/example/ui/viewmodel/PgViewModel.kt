@@ -130,6 +130,11 @@ class PgViewModel @Inject constructor(
         _isUnlocked.value = false
     }
 
+    fun unlockAppDirectly() {
+        _isUnlocked.value = true
+        _pinError.value = null
+    }
+
     // ==========================================
     // DATA MUTATION METHODS
     // ==========================================

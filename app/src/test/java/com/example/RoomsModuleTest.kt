@@ -64,8 +64,9 @@ class RoomsModuleTest {
         roomDao = db.roomDao()
         tenantDao = db.tenantDao()
         rentPaymentDao = db.rentPaymentDao()
+        val currentPropertyManager = com.example.features.properties.data.CurrentPropertyManager(context, db.propertyDao())
 
-        repository = RoomRepositoryImpl(roomDao, tenantDao, rentPaymentDao)
+        repository = RoomRepositoryImpl(roomDao, tenantDao, rentPaymentDao, currentPropertyManager)
 
         // Initialize Use Cases
         getRoomsUseCase = GetRoomsUseCase(repository)

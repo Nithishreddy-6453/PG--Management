@@ -27,7 +27,7 @@ private val Context.propertyDataStore: DataStore<Preferences> by preferencesData
 class CurrentPropertyManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val propertyDao: PropertyDao,
-    private val auth: FirebaseAuth
+    private val auth: FirebaseAuth? = null
 ) {
     companion object {
         val KEY_CURRENT_PROPERTY_ID = stringPreferencesKey("current_property_id")
@@ -36,32 +36,36 @@ class CurrentPropertyManager @Inject constructor(
     }
 
     private val currentOwnerId: String
-        get() = auth.currentUser?.uid ?: ""
+        get() = try { auth?.currentUser?.uid ?: "" } catch (_: Exception) { "" }
 
-    val currentPropertyIdFlow: Flow<String> = context.propertyDataStore.data
-        .map { prefs ->
+    @Volatile
+    private var inMemoryPropertyId: String = DEFAULT_PROPERTY_ID
+
+    private val _inMemoryPropertyFlow = kotlinx.coroutines.flow.MutableStateFlow(DEFAULT_PROPERTY_ID)
+
+    val currentPropertyIdFlow: Flow<String> = kotlinx.coroutines.flow.merge(
+        _inMemoryPropertyFlow,
+        context.propertyDataStore.data.map { prefs ->
             val storedId = prefs[KEY_CURRENT_PROPERTY_ID]
-            if (!storedId.isNullOrBlank()) {
-                storedId
-            } else {
-                DEFAULT_PROPERTY_ID
-            }
+            val resolved = if (!storedId.isNullOrBlank()) storedId else inMemoryPropertyId
+            inMemoryPropertyId = resolved
+            resolved
         }
-        .distinctUntilChanged()
+    ).distinctUntilChanged()
 
     suspend fun getCurrentPropertyId(): String {
-        return try {
-            currentPropertyIdFlow.first()
-        } catch (_: Exception) {
-            DEFAULT_PROPERTY_ID
-        }
+        return inMemoryPropertyId
     }
 
     suspend fun setCurrentPropertyId(propertyId: String) {
         if (propertyId.isNotBlank()) {
-            context.propertyDataStore.edit { prefs ->
-                prefs[KEY_CURRENT_PROPERTY_ID] = propertyId
-            }
+            inMemoryPropertyId = propertyId
+            _inMemoryPropertyFlow.value = propertyId
+            try {
+                context.propertyDataStore.edit { prefs ->
+                    prefs[KEY_CURRENT_PROPERTY_ID] = propertyId
+                }
+            } catch (_: Exception) {}
         }
     }
 

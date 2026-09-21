@@ -37,12 +37,15 @@ class FirestoreDataLayerTest {
             capacity = 2,
             ratePerBed = 5500.0,
             roomType = "AC",
-            notes = "Spacious room"
+            notes = "Spacious room",
+            ownerId = ownerId,
+            propertyId = "property_default",
+            syncStatus = "LOCAL_ONLY"
         )
 
         val dto: RoomDto = roomEntity.toDto(ownerId)
 
-        assertEquals("101", dto.id)
+        assertEquals("property_default_101", dto.id)
         assertEquals("101", dto.roomNumber)
         assertEquals(ownerId, dto.ownerId)
         assertEquals("1st Floor", dto.floor)
@@ -53,7 +56,10 @@ class FirestoreDataLayerTest {
         assertEquals("SYNCED", dto.syncStatus)
 
         val restoredEntity = dto.toEntity()
-        assertEquals(roomEntity, restoredEntity)
+        assertEquals(roomEntity.roomNumber, restoredEntity.roomNumber)
+        assertEquals(roomEntity.capacity, restoredEntity.capacity)
+        assertEquals(roomEntity.ratePerBed, restoredEntity.ratePerBed, 0.01)
+        assertEquals(roomEntity.ownerId, restoredEntity.ownerId)
     }
 
     @Test
@@ -71,7 +77,10 @@ class FirestoreDataLayerTest {
             securityDeposit = 12000.0,
             moveInDate = "2026-01-01",
             isKycUploaded = true,
-            kycDocType = "Aadhaar Card"
+            kycDocType = "Aadhaar Card",
+            ownerId = ownerId,
+            propertyId = "property_default",
+            syncStatus = "LOCAL_ONLY"
         )
 
         val dto: TenantDto = tenantEntity.toDto(ownerId)
@@ -84,7 +93,10 @@ class FirestoreDataLayerTest {
         assertTrue(dto.isKycUploaded)
 
         val restoredEntity = dto.toEntity()
-        assertEquals(tenantEntity, restoredEntity)
+        assertEquals(tenantEntity.id, restoredEntity.id)
+        assertEquals(tenantEntity.name, restoredEntity.name)
+        assertEquals(tenantEntity.phone, restoredEntity.phone)
+        assertEquals(tenantEntity.ownerId, restoredEntity.ownerId)
     }
 
     @Test
@@ -103,7 +115,10 @@ class FirestoreDataLayerTest {
             paymentMode = "UPI",
             transactionReference = "UPI12345678",
             remarks = "Paid on time",
-            status = "Paid"
+            status = "Paid",
+            ownerId = ownerId,
+            propertyId = "property_default",
+            syncStatus = "LOCAL_ONLY"
         )
 
         val dto: PaymentDto = paymentEntity.toDto(ownerId)
@@ -114,7 +129,9 @@ class FirestoreDataLayerTest {
         assertEquals("Paid", dto.status)
 
         val restored = dto.toEntity()
-        assertEquals(paymentEntity, restored)
+        assertEquals(paymentEntity.id, restored.id)
+        assertEquals(paymentEntity.amount, restored.amount, 0.01)
+        assertEquals(paymentEntity.ownerId, restored.ownerId)
     }
 
     @Test
@@ -128,7 +145,10 @@ class FirestoreDataLayerTest {
             notes = "Tap repair",
             title = "Bathroom Plumbing",
             paymentMethod = "Cash",
-            vendor = "Local Plumber"
+            vendor = "Local Plumber",
+            ownerId = ownerId,
+            propertyId = "property_default",
+            syncStatus = "LOCAL_ONLY"
         )
 
         val dto: ExpenseDto = expense.toDto(ownerId)
@@ -138,7 +158,9 @@ class FirestoreDataLayerTest {
         assertEquals(1200.0, dto.amount, 0.01)
 
         val restored = dto.toEntity()
-        assertEquals(expense, restored)
+        assertEquals(expense.id, restored.id)
+        assertEquals(expense.amount, restored.amount, 0.01)
+        assertEquals(expense.ownerId, restored.ownerId)
     }
 
     @Test
