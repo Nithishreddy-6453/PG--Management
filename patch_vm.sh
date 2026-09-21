@@ -1,0 +1,1 @@
+sed -i 's/val dueDay = currentState.defaultRentDueDay.toIntOrNull() ?: 1/val dueDay = currentState.defaultRentDueDay.toIntOrNull() ?: 0/g' app/src/main/java/com/example/features/settings/ui/viewmodel/BusinessSettingsViewModel.kt

@@ -1,0 +1,6 @@
+{
+  "name": "PG Manager",
+  "description": "A premium mobile-first SaaS application for Paying Guest (PG) owners in India to manage daily operations efficiently.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

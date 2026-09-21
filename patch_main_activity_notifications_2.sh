@@ -1,0 +1,8 @@
+sed -i 's/onNavigateToNotifications = { \/\* TODO \*\/ }/onNavigateToNotifications = { navController.navigate(Screen.NotificationSettings.route) }/g' app/src/main/java/com/example/MainActivity.kt
+sed -i 's/onNavigateToAbout = { \/\* TODO \*\/ }/onNavigateToAbout = { navController.navigate(Screen.AboutSettings.route) }/g' app/src/main/java/com/example/MainActivity.kt
+
+sed -i '/composable(route = Screen.BackupSettings.route) {/i\                        composable(route = Screen.NotificationSettings.route) {\n                            com.example.features.settings.ui.NotificationSettingsScreen(\n                                onBackClick = { navController.popBackStack() }\n                            )\n                        }' app/src/main/java/com/example/MainActivity.kt
+
+sed -i '/composable(route = Screen.BackupSettings.route) {/i\                        composable(route = Screen.AboutSettings.route) {\n                            com.example.features.settings.ui.AboutScreen(\n                                onBackClick = { navController.popBackStack() },\n                                onNavigateToLicenses = { navController.navigate("licenses") }\n                            )\n                        }' app/src/main/java/com/example/MainActivity.kt
+
+sed -i '/composable(route = Screen.BackupSettings.route) {/i\                        composable(route = "licenses") {\n                            com.example.features.settings.ui.LicensesScreen(\n                                onBackClick = { navController.popBackStack() }\n                            )\n                        }' app/src/main/java/com/example/MainActivity.kt

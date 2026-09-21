@@ -1,0 +1,6 @@
+                        composable(route = Screen.Profile.route) {
+                            ProfileScreen(
+                                viewModel = viewModel,
+                                onBackClick = { navController.popBackStack() }
+                            )
+                        }

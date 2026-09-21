@@ -1,0 +1,148 @@
+package com.example.data.sync
+
+import android.content.Context
+import com.example.core.common.PgLogger
+import com.example.core.common.PgResult
+import com.example.core.device.DeviceIdentityManager
+import com.example.data.database.ConflictRecordEntity
+import com.example.data.database.SyncOperationEntity
+import com.example.data.database.SyncQueueDao
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import javax.inject.Inject
+import javax.inject.Singleton
+
+@Singleton
+class SyncCoordinator @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val syncQueueDao: SyncQueueDao,
+    private val syncEngine: SyncEngine,
+    private val realtimeSyncManager: RealtimeSyncManager,
+    private val deviceIdentityManager: DeviceIdentityManager,
+    private val logger: PgLogger
+) {
+    val syncDiagnosticsFlow: Flow<SyncDiagnostics> = combine(
+        syncQueueDao.getPendingCountFlow(),
+        syncQueueDao.getFailedCountFlow(),
+        syncEngine.conflictCountFlow,
+        syncEngine.isSyncing,
+        syncEngine.lastSyncedAt
+    ) { pending, failed, conflict, syncing, lastSynced ->
+        SyncDiagnostics(
+            pendingCount = pending,
+            failedCount = failed,
+            conflictCount = conflict,
+            isSyncing = syncing,
+            lastSyncedAt = lastSynced,
+            lastError = syncEngine.lastError.value
+        )
+    }
+
+    val conflictRecordsFlow: Flow<List<ConflictRecordEntity>> = syncEngine.conflictRecordsFlow
+
+    suspend fun enqueueOperation(
+        entityType: String,
+        entityId: String,
+        operationType: String,
+        payloadJson: String = ""
+    ) {
+        logger.i(TAG, "Enqueuing local sync operation: $operationType on $entityType ($entityId)")
+        val op = SyncOperationEntity(
+            entityType = entityType,
+            entityId = entityId,
+            operationType = operationType,
+            payloadJson = payloadJson,
+            createdAt = System.currentTimeMillis(),
+            status = "PENDING_UPLOAD"
+        )
+        syncQueueDao.enqueue(op)
+        triggerImmediateSync()
+    }
+
+    fun triggerImmediateSync() {
+        if (!isUserAuthenticated()) {
+            logger.i(TAG, "Skipping immediate sync: User is not authenticated")
+            return
+        }
+        try {
+            SyncWorker.enqueueImmediateSync(context)
+        } catch (e: Exception) {
+            logger.w(TAG, "Failed scheduling immediate WorkManager sync: ${e.message}")
+        }
+    }
+
+    fun initializePeriodicSync() {
+        if (!isUserAuthenticated()) {
+            logger.i(TAG, "Skipping periodic sync: User is not authenticated")
+            return
+        }
+        try {
+            SyncWorker.schedulePeriodicSync(context)
+            logger.i(TAG, "Periodic 15-minute background sync scheduled")
+        } catch (e: Exception) {
+            logger.w(TAG, "Failed scheduling periodic sync: ${e.message}")
+        }
+
+        // Also start realtime listeners
+        val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+        if (!uid.isNullOrBlank()) {
+            realtimeSyncManager.startListening(uid)
+        }
+    }
+
+    suspend fun handleUserSignIn(newOwnerId: String) {
+        logger.i(TAG, "User signed in: $newOwnerId")
+        val previousOwner = deviceIdentityManager.getLastActiveOwnerId()
+        if (!previousOwner.isNullOrBlank() && previousOwner != newOwnerId) {
+            logger.i(TAG, "Different account detected (old: $previousOwner, new: $newOwnerId). Purging local data.")
+            syncEngine.clearLocalUserData()
+        }
+        deviceIdentityManager.setLastActiveOwnerId(newOwnerId)
+        realtimeSyncManager.startListening(newOwnerId)
+        initializePeriodicSync()
+        triggerImmediateSync()
+    }
+
+    suspend fun handleUserSignOut() {
+        logger.i(TAG, "User signed out. Purging session and local data.")
+        realtimeSyncManager.stopListening()
+        cancelPeriodicSync()
+        deviceIdentityManager.setLastActiveOwnerId(null)
+        syncEngine.clearLocalUserData()
+    }
+
+    private fun isUserAuthenticated(): Boolean {
+        return try {
+            com.google.firebase.FirebaseApp.getApps(context).isNotEmpty() &&
+                com.google.firebase.auth.FirebaseAuth.getInstance().currentUser != null
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun cancelPeriodicSync() {
+        try {
+            SyncWorker.cancelAllSyncWork(context)
+            logger.i(TAG, "Background sync cancelled")
+        } catch (e: Exception) {
+            logger.w(TAG, "Failed cancelling background sync: ${e.message}")
+        }
+    }
+
+    suspend fun syncNow() = syncEngine.syncNow()
+
+    suspend fun resolveConflict(conflictId: String, strategy: ConflictResolutionStrategy): PgResult<Unit> {
+        val result = syncEngine.resolveConflict(conflictId, strategy)
+        if (result is PgResult.Success) {
+            triggerImmediateSync()
+        }
+        return result
+    }
+
+    fun getDeviceId(): String = deviceIdentityManager.getDeviceId()
+
+    companion object {
+        private const val TAG = "SyncCoordinator"
+    }
+}

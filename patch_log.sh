@@ -1,0 +1,1 @@
+sed -i 's/val expectedPin = currentProfile?.pinCode?.trim() ?: "1234"/val expectedPin = currentProfile?.pinCode?.trim() ?: "1234"\n            android.util.Log.d("AUTH_DEBUG", "expectedPin: $expectedPin, pin: $pin, length: ${expectedPin.length}")/' app/src/main/java/com/example/ui/viewmodel/PgViewModel.kt

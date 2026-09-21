@@ -1,0 +1,1 @@
+sed -i 's/val updatedProfile = profile?.copy(pinCode = newPin) ?: OwnerProfileEntity(id = 1, pinCode = newPin)/val updatedProfile = profile?.copy(pinCode = newPin) ?: OwnerProfileEntity(id = 1, pgName = "My PG", ownerName = "Owner", phone = "", upiId = "", pinCode = newPin)/g' app/src/main/java/com/example/features/settings/ui/viewmodel/SecurityViewModel.kt
