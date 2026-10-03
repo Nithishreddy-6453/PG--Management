@@ -1,5 +1,7 @@
 package com.example.features.tenants.domain.repository
 
+import com.example.data.database.BedAssignmentEntity
+import com.example.data.database.BedEntity
 import com.example.data.database.RoomEntity
 import com.example.data.database.TenantEntity
 import com.example.data.database.RentPaymentEntity
@@ -20,6 +22,16 @@ interface TenantRepository {
     fun getAllRoomsFlow(): Flow<List<RoomEntity>>
     suspend fun insertRoom(room: RoomEntity)
     suspend fun getCurrentPropertyId(): String
+
+    // Bed operations for assignments & validation
+    suspend fun getBed(roomNumber: String, bedId: String): BedEntity?
+    suspend fun getBedsForRoom(roomNumber: String): List<BedEntity>
+    suspend fun insertBed(bed: BedEntity)
+    suspend fun updateBed(bed: BedEntity)
+    suspend fun getActiveAssignmentForBed(roomNumber: String, bedId: String): BedAssignmentEntity?
+    suspend fun getActiveAssignmentForTenant(tenantId: Int): BedAssignmentEntity?
+    suspend fun insertBedAssignment(assignment: BedAssignmentEntity)
+    suspend fun updateBedAssignment(assignment: BedAssignmentEntity)
     
     // Rent payments for vacation and checkout lifecycle
     suspend fun insertRentPayment(payment: RentPaymentEntity)

@@ -1,5 +1,6 @@
 package com.example.features.reports.domain.model
 
+import androidx.compose.runtime.Immutable
 import com.example.data.database.BedEntity
 import com.example.data.database.ExpenseEntity
 import com.example.data.database.RentPaymentEntity
@@ -9,8 +10,11 @@ import com.example.data.database.TenantEntity
 // ==========================================
 // 1. REPORT PERIOD
 // ==========================================
+@Immutable
 sealed class ReportPeriod {
+    @Immutable
     data class Monthly(val billingMonth: String) : ReportPeriod()
+    @Immutable
     data class CustomRange(val startDate: String, val endDate: String) : ReportPeriod()
 
     fun displayLabel(language: String = "EN"): String = when (this) {
@@ -24,6 +28,7 @@ sealed class ReportPeriod {
 // ==========================================
 // 2. OWNER OVERVIEW
 // ==========================================
+@Immutable
 data class OwnerOverviewReport(
     val propertyName: String,
     val reportMonth: String,
@@ -53,6 +58,7 @@ data class OwnerOverviewReport(
 // ==========================================
 // 3. RENT COLLECTION & METRICS
 // ==========================================
+@Immutable
 data class RentMetrics(
     val rentDue: Double,
     val rentCollectedCurrentMonth: Double,
@@ -69,6 +75,7 @@ data class RentMetrics(
     val tenantRentRecords: List<TenantRentRecord>
 )
 
+@Immutable
 data class TenantRentRecord(
     val tenantId: Int,
     val tenantName: String,
@@ -92,6 +99,7 @@ data class TenantRentRecord(
 // ==========================================
 // 4. PAYMENT HISTORY
 // ==========================================
+@Immutable
 data class PaymentHistoryItem(
     val paymentId: Int,
     val paymentDate: String,
@@ -110,6 +118,7 @@ data class PaymentHistoryItem(
 // ==========================================
 // 5. EXPENSE REPORT METRICS
 // ==========================================
+@Immutable
 data class ExpenseReportMetrics(
     val totalExpenses: Double,
     val paidExpenses: Double,
@@ -121,6 +130,7 @@ data class ExpenseReportMetrics(
     val expenseRecords: List<ExpenseEntity>
 )
 
+@Immutable
 data class ExpenseCategoryBreakdown(
     val category: String,
     val amount: Double,
@@ -131,6 +141,7 @@ data class ExpenseCategoryBreakdown(
 // ==========================================
 // 6. BED-LEVEL OCCUPANCY & ROOM STATUS
 // ==========================================
+@Immutable
 data class BedOccupancyReport(
     val totalRooms: Int,
     val totalUsableBeds: Int,
@@ -141,6 +152,7 @@ data class BedOccupancyReport(
     val roomsDetail: List<RoomBedStatusDetail>
 )
 
+@Immutable
 data class RoomBedStatusDetail(
     val roomNumber: String,
     val floor: String,
@@ -159,6 +171,7 @@ data class RoomBedStatusDetail(
 // ==========================================
 // 7. VACANCY REPORT
 // ==========================================
+@Immutable
 data class VacancyReport(
     val availableBedsCount: Int,
     val emptyRoomsCount: Int,
@@ -166,6 +179,7 @@ data class VacancyReport(
     val upcomingVacancies: List<UpcomingVacancyDetail>
 )
 
+@Immutable
 data class UpcomingVacancyDetail(
     val tenantId: Int,
     val tenantName: String,
@@ -178,6 +192,7 @@ data class UpcomingVacancyDetail(
 // ==========================================
 // 8. TENANT STATEMENTS
 // ==========================================
+@Immutable
 data class TenantStatementItem(
     val tenantId: Int,
     val tenantName: String,
@@ -191,6 +206,7 @@ data class TenantStatementItem(
     val advanceCredit: Double
 )
 
+@Immutable
 data class TenantMonthEntry(
     val month: String,
     val rentDue: Double,
@@ -202,6 +218,7 @@ data class TenantMonthEntry(
 // ==========================================
 // 9. MONTHLY HISTORY
 // ==========================================
+@Immutable
 data class MonthlyHistorySummary(
     val month: String,
     val rentDue: Double,
@@ -227,6 +244,7 @@ enum class AttentionType {
     UNPAID_EXPENSE
 }
 
+@Immutable
 data class AttentionItem(
     val type: AttentionType,
     val title: String,
@@ -238,6 +256,7 @@ data class AttentionItem(
 // ==========================================
 // 11. DATA FRESHNESS
 // ==========================================
+@Immutable
 data class DataFreshness(
     val lastSynchronized: String,
     val lastReportUpdate: String,
@@ -248,6 +267,7 @@ data class DataFreshness(
 // ==========================================
 // 12. UNIFIED COMPLETE OWNER REPORT MODEL
 // ==========================================
+@Immutable
 data class CompleteOwnerReport(
     val period: ReportPeriod,
     val overview: OwnerOverviewReport,

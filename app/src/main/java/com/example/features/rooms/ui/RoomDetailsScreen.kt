@@ -159,31 +159,19 @@ fun RoomDetailsScreen(
             }
 
             // Deletion dialog
-            if (showDeleteConfirmDialog && uiState is RoomDetailsUiState.Success) {
-                val roomNo = (uiState as RoomDetailsUiState.Success).roomSummary.roomNumber
-                AlertDialog(
-                    onDismissRequest = { showDeleteConfirmDialog = false },
-                    title = { Text("Delete Room $roomNo?") },
-                    text = { Text("Are you sure you want to delete this room? This action will check for active tenants first and prevent deletion if anyone is occupying the room.") },
-                    confirmButton = {
-                        TextButton(
-                            onClick = {
-                                viewModel.deleteRoom()
-                                showDeleteConfirmDialog = false
-                            },
-                            modifier = Modifier.testTag("confirm_delete_button")
-                        ) {
-                            Text("Delete Room", color = MaterialTheme.colorScheme.error)
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showDeleteConfirmDialog = false }) {
-                            Text("Cancel")
-                        }
-                    },
-                    modifier = Modifier.testTag("delete_room_dialog")
-                )
-            }
+            val currentRoomNo = (uiState as? RoomDetailsUiState.Success)?.roomSummary?.roomNumber ?: ""
+            com.example.core.designsystem.PgConfirmDialog(
+                isOpen = showDeleteConfirmDialog && uiState is RoomDetailsUiState.Success,
+                title = "Delete Room $currentRoomNo?",
+                message = "Are you sure you want to delete this room? Active tenants must be checked out first. Historical rent and billing records will remain intact.",
+                confirmText = "Delete Room",
+                isDestructive = true,
+                onConfirm = {
+                    viewModel.deleteRoom()
+                    showDeleteConfirmDialog = false
+                },
+                onDismiss = { showDeleteConfirmDialog = false }
+            )
         }
     }
 }

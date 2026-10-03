@@ -402,12 +402,13 @@ class TenantDetailsViewModel @Inject constructor(
         }
     }
 
-    fun vacateTenant() {
+    fun vacateTenant(leavingDate: String? = null) {
         val currentState = _uiState.value
         if (currentState is TenantDetailsUiState.Success) {
             _uiState.value = currentState.copy(isVacating = true)
             viewModelScope.launch {
-                val result = vacateTenantUseCase.execute(currentState.tenant.id)
+                val effective = leavingDate ?: currentState.tenant.leavingDate.ifBlank { null }
+                val result = vacateTenantUseCase.execute(currentState.tenant.id, effective)
                 if (result is TenantValidationResult.Success) {
                     _uiEffect.emit(TenantDetailsUiEffect.ShowToast("Tenant vacated successfully."))
                     loadTenantDetails()

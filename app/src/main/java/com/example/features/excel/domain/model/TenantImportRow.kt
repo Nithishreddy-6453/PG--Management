@@ -9,6 +9,7 @@ data class TenantImportRow(
     val rowNumber: Int,
     val name: String,
     val roomNumber: String,
+    val bedId: String = "",
     val phone: String,
     val monthlyRent: Double,
     val joinDate: String,

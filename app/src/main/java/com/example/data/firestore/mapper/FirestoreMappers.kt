@@ -128,7 +128,7 @@ fun TenantEntity.toDto(ownerId: String, deviceId: String = ""): TenantDto {
         id > 0 -> "tenant_$id"
         else -> "tenant_${System.currentTimeMillis()}"
     }
-    val propId = if (propertyId.isNotBlank()) propertyId else "property_default"
+    val propId = if (propertyId.isNotBlank() && propertyId != "property_default") propertyId else ""
     return TenantDto(
         id = docId,
         cloudId = docId,
@@ -172,7 +172,7 @@ fun TenantDto.toEntity(): TenantEntity {
         localId > 0 -> "tenant_$localId"
         else -> ""
     }
-    val propId = if (propertyId.isNotBlank()) propertyId else "property_default"
+    val propId = if (propertyId.isNotBlank() && propertyId != "property_default") propertyId else ""
     return TenantEntity(
         id = localId,
         cloudId = cId,

@@ -1,10 +1,14 @@
 package com.example.features.dashboard.domain.usecase
 
+import androidx.compose.runtime.Immutable
 import com.example.features.dashboard.data.DashboardRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 
+@Immutable
 data class UpcomingVacancyItem(
     val tenantId: Int,
     val tenantName: String,
@@ -33,6 +37,6 @@ class UpcomingVacanciesUseCase @Inject constructor(
                         leavingDate = it.leavingDate
                     )
                 }
-        }
+        }.flowOn(Dispatchers.Default)
     }
 }

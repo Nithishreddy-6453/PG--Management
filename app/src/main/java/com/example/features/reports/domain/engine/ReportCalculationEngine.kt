@@ -352,11 +352,17 @@ object ReportCalculationEngine {
         }.sortedByDescending { it.paymentDate }
 
         // 10. TENANT STATEMENTS
+        val monthOrderCache = mutableMapOf<String, Int>()
+        fun getMonthOrder(mStr: String): Int = monthOrderCache.getOrPut(mStr) {
+            val m = RentBillingEngine.parseBillingMonth(mStr)
+            m.year * 100 + m.month1Based
+        }
+
+        val paymentsByTenant = activePayments.groupBy { it.tenantId }
+
         val tenantStatements = tenants.map { t ->
-            val tPayments = activePayments.filter { it.tenantId == t.id }.sortedWith { p1, p2 ->
-                val m1 = RentBillingEngine.parseBillingMonth(p1.billingMonth)
-                val m2 = RentBillingEngine.parseBillingMonth(p2.billingMonth)
-                (m1.year * 100 + m1.month1Based).compareTo(m2.year * 100 + m2.month1Based)
+            val tPayments = (paymentsByTenant[t.id] ?: emptyList()).sortedBy { p ->
+                getMonthOrder(p.billingMonth)
             }
 
             var prevOutstanding = 0.0
@@ -446,10 +452,8 @@ object ReportCalculationEngine {
                 occupancyPercentage = mOccPct,
                 availableBeds = (totalPgCapacity - mActiveTenants).coerceAtLeast(0)
             )
-        }.sortedWith { h1, h2 ->
-            val p1 = RentBillingEngine.parseBillingMonth(h1.month)
-            val p2 = RentBillingEngine.parseBillingMonth(h2.month)
-            (p2.year * 100 + p2.month1Based).compareTo(p1.year * 100 + p1.month1Based)
+        }.sortedByDescending { h ->
+            getMonthOrder(h.month)
         }
 
         // 12. WHAT NEEDS ATTENTION

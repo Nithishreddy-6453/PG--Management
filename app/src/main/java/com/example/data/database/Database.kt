@@ -585,10 +585,16 @@ interface BedAssignmentDao {
     @Query("SELECT * FROM bed_assignments WHERE propertyId = :propertyId AND tenantId = :tenantId AND deleted = 0")
     suspend fun getAssignmentsForTenant(propertyId: String, tenantId: Int): List<BedAssignmentEntity>
 
-    @Query("SELECT * FROM bed_assignments WHERE propertyId = :propertyId AND roomNumber = :roomNumber AND bedId = :bedId AND endDate IS NULL AND deleted = 0 LIMIT 1")
+    @Query("SELECT * FROM bed_assignments WHERE propertyId = :propertyId AND roomNumber = :roomNumber AND bedId = :bedId AND (endDate IS NULL OR endDate > :currentDate) AND deleted = 0 LIMIT 1")
+    suspend fun getActiveAssignmentForBed(propertyId: String, roomNumber: String, bedId: String, currentDate: String): BedAssignmentEntity?
+
+    @Query("SELECT * FROM bed_assignments WHERE propertyId = :propertyId AND roomNumber = :roomNumber AND bedId = :bedId AND (endDate IS NULL OR endDate > date('now')) AND deleted = 0 LIMIT 1")
     suspend fun getActiveAssignmentForBed(propertyId: String, roomNumber: String, bedId: String): BedAssignmentEntity?
 
-    @Query("SELECT * FROM bed_assignments WHERE propertyId = :propertyId AND tenantId = :tenantId AND endDate IS NULL AND deleted = 0 LIMIT 1")
+    @Query("SELECT * FROM bed_assignments WHERE propertyId = :propertyId AND tenantId = :tenantId AND (endDate IS NULL OR endDate > :currentDate) AND deleted = 0 LIMIT 1")
+    suspend fun getActiveAssignmentForTenant(propertyId: String, tenantId: Int, currentDate: String): BedAssignmentEntity?
+
+    @Query("SELECT * FROM bed_assignments WHERE propertyId = :propertyId AND tenantId = :tenantId AND (endDate IS NULL OR endDate > date('now')) AND deleted = 0 LIMIT 1")
     suspend fun getActiveAssignmentForTenant(propertyId: String, tenantId: Int): BedAssignmentEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -1524,7 +1530,7 @@ abstract class AppDatabase : RoomDatabase() {
                 )
             )
 
-            // 3. Insert Base Rooms
+            // 3. Insert Base Rooms and Beds
             val rooms = listOf(
                 RoomEntity("101", "1st Floor", 2, 12000.0, propertyId = "property_default"),
                 RoomEntity("102", "1st Floor", 1, 12500.0, propertyId = "property_default"),
@@ -1533,9 +1539,20 @@ abstract class AppDatabase : RoomDatabase() {
             )
             for (room in rooms) {
                 db.roomDao().insertRoom(room)
+                for (i in 1..room.capacity) {
+                    val bedId = "Bed $i"
+                    db.bedDao().insertBed(
+                        BedEntity(
+                            roomNumber = room.roomNumber,
+                            bedId = bedId,
+                            status = "AVAILABLE",
+                            propertyId = "property_default"
+                        )
+                    )
+                }
             }
 
-            // 4. Insert Base Tenants
+            // 4. Insert Base Tenants and Authoritative Bed Assignments
             val arjunId = db.tenantDao().insertTenant(
                 TenantEntity(
                     id = 0,
@@ -1544,7 +1561,7 @@ abstract class AppDatabase : RoomDatabase() {
                     email = "arjun@gmail.com",
                     emergencyContact = "9876543211",
                     roomNumber = "204",
-                    bedId = "Bed A",
+                    bedId = "Bed 1",
                     monthlyRent = 14000.0,
                     securityDeposit = 15000.0,
                     moveInDate = "2026-06-01",
@@ -1554,6 +1571,26 @@ abstract class AppDatabase : RoomDatabase() {
                 )
             ).toInt()
 
+            db.bedAssignmentDao().insertAssignment(
+                BedAssignmentEntity(
+                    assignmentId = java.util.UUID.randomUUID().toString(),
+                    tenantId = arjunId,
+                    roomNumber = "204",
+                    bedId = "Bed 1",
+                    startDate = "2026-06-01",
+                    agreedRent = 14000.0,
+                    propertyId = "property_default"
+                )
+            )
+            db.bedDao().insertBed(
+                BedEntity(
+                    roomNumber = "204",
+                    bedId = "Bed 1",
+                    status = "OCCUPIED",
+                    propertyId = "property_default"
+                )
+            )
+
             val priyaId = db.tenantDao().insertTenant(
                 TenantEntity(
                     id = 0,
@@ -1562,7 +1599,7 @@ abstract class AppDatabase : RoomDatabase() {
                     email = "priya@gmail.com",
                     emergencyContact = "9812345679",
                     roomNumber = "102",
-                    bedId = "Bed A",
+                    bedId = "Bed 1",
                     monthlyRent = 12500.0,
                     securityDeposit = 12500.0,
                     moveInDate = "2026-05-15",
@@ -1571,6 +1608,26 @@ abstract class AppDatabase : RoomDatabase() {
                     propertyId = "property_default"
                 )
             ).toInt()
+
+            db.bedAssignmentDao().insertAssignment(
+                BedAssignmentEntity(
+                    assignmentId = java.util.UUID.randomUUID().toString(),
+                    tenantId = priyaId,
+                    roomNumber = "102",
+                    bedId = "Bed 1",
+                    startDate = "2026-05-15",
+                    agreedRent = 12500.0,
+                    propertyId = "property_default"
+                )
+            )
+            db.bedDao().insertBed(
+                BedEntity(
+                    roomNumber = "102",
+                    bedId = "Bed 1",
+                    status = "OCCUPIED",
+                    propertyId = "property_default"
+                )
+            )
 
             // 5. Insert Rent Payments for July 2026
             db.rentPaymentDao().insertPayment(

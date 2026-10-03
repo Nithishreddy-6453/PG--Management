@@ -16,6 +16,8 @@ import com.example.features.reports.data.PdfReportGenerator
 import com.example.features.reports.domain.engine.ReportCalculationEngine
 import com.example.features.reports.domain.model.*
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.io.File
@@ -40,6 +42,7 @@ sealed interface ReportsUiState {
     ) : ReportsUiState
 }
 
+@OptIn(FlowPreview::class)
 @HiltViewModel
 class ReportsViewModel @Inject constructor(
     private val repository: DashboardRepository,
@@ -253,7 +256,11 @@ class ReportsViewModel @Inject constructor(
             isExporting = exporting,
             exportMessage = exportMsg
         )
-    }.stateIn(
+    }
+    .debounce(50L)
+    .distinctUntilChanged()
+    .flowOn(Dispatchers.Default)
+    .stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = ReportsUiState.Loading

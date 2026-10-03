@@ -1,6 +1,7 @@
 package com.example.features.startup
 
 import com.example.core.common.PgLogger
+import com.example.core.integrity.DataIntegrityManager
 import com.example.data.sync.SyncCoordinator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -10,6 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 import com.example.core.di.ApplicationScope
+import com.example.features.properties.data.CurrentPropertyManager
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -30,9 +32,11 @@ sealed interface StartupState {
 class StartupManager @Inject constructor(
     private val logger: PgLogger,
     private val syncCoordinator: SyncCoordinator?,
-    @ApplicationScope private val externalScope: CoroutineScope
+    private val dataIntegrityManager: DataIntegrityManager?,
+    @ApplicationScope private val externalScope: CoroutineScope,
+    private val currentPropertyManager: CurrentPropertyManager? = null
 ) {
-    constructor(logger: PgLogger, externalScope: CoroutineScope) : this(logger, null, externalScope)
+    constructor(logger: PgLogger, externalScope: CoroutineScope) : this(logger, null, null, externalScope, null)
 
     private val _state = MutableStateFlow<StartupState>(StartupState.Idle)
     val state: StateFlow<StartupState> = _state.asStateFlow()
@@ -52,19 +56,28 @@ class StartupManager @Inject constructor(
                 logger.i(TAG, "Starting system bootstrap...")
                 
                 _state.value = StartupState.Initializing(0.1f, "Initializing Logger...")
-                delay(150) // Simulate fast initialization step
+                delay(100)
                 
-                _state.value = StartupState.Initializing(0.4f, "Verifying Session & Sync...")
+                _state.value = StartupState.Initializing(0.3f, "Verifying Session & Sync...")
                 val uid = try {
                     com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
                 } catch (e: Exception) {
                     null
                 }
                 if (!uid.isNullOrBlank() && syncCoordinator != null) {
-                    _state.value = StartupState.Initializing(0.6f, "Checking cloud account data...")
+                    _state.value = StartupState.Initializing(0.5f, "Checking cloud account data...")
                     syncCoordinator.handleUserSignIn(uid)
                 }
-                delay(150)
+
+                _state.value = StartupState.Initializing(0.7f, "Resolving active property...")
+                currentPropertyManager?.restoreActiveProperty()
+
+                _state.value = StartupState.Initializing(0.85f, "Verifying room & bed data integrity...")
+                try {
+                    dataIntegrityManager?.performSafeRepair()
+                } catch (e: Exception) {
+                    logger.w(TAG, "Data integrity repair non-fatal warning: ${e.message}")
+                }
                 
                 _state.value = StartupState.Initializing(1.0f, "System ready.")
                 logger.i(TAG, "Bootstrap completed successfully.")

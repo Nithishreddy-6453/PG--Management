@@ -6,6 +6,9 @@ import com.example.features.properties.data.CurrentPropertyManager
 import com.example.features.tenants.domain.repository.TenantRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flatMapLatest
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -14,6 +17,8 @@ class TenantRepositoryImpl @Inject constructor(
     private val roomDao: RoomDao,
     private val tenantDao: TenantDao,
     private val rentPaymentDao: RentPaymentDao,
+    private val bedDao: BedDao,
+    private val bedAssignmentDao: BedAssignmentDao,
     private val currentPropertyManager: CurrentPropertyManager,
     private val syncCoordinator: SyncCoordinator? = null
 ) : TenantRepository {
@@ -97,6 +102,23 @@ class TenantRepositoryImpl @Inject constructor(
             syncStatus = "PENDING_UPLOAD"
         )
         roomDao.insertRoom(updated)
+        for (i in 1..updated.capacity) {
+            val bedId = "Bed $i"
+            if (bedDao.getBed(updated.propertyId, updated.roomNumber, bedId) == null) {
+                bedDao.insertBed(
+                    BedEntity(
+                        roomNumber = updated.roomNumber,
+                        bedId = bedId,
+                        status = "AVAILABLE",
+                        propertyId = updated.propertyId,
+                        ownerId = ownerId,
+                        createdAt = System.currentTimeMillis(),
+                        updatedAt = System.currentTimeMillis(),
+                        syncStatus = "PENDING_UPLOAD"
+                    )
+                )
+            }
+        }
         syncCoordinator?.enqueueOperation("ROOM", "${updated.propertyId}_${updated.roomNumber}", "CREATE")
     }
 
@@ -109,6 +131,72 @@ class TenantRepositoryImpl @Inject constructor(
         return currentPropertyManager.currentPropertyIdFlow.flatMapLatest { propId ->
             roomDao.getRoomsForPropertyFlow(propId)
         }
+    }
+
+    override suspend fun getBed(roomNumber: String, bedId: String): BedEntity? {
+        val propId = currentPropertyManager.getCurrentPropertyId()
+        return bedDao.getBed(propId, roomNumber, bedId)
+    }
+
+    override suspend fun getBedsForRoom(roomNumber: String): List<BedEntity> {
+        val propId = currentPropertyManager.getCurrentPropertyId()
+        return bedDao.getBedsForRoom(propId, roomNumber)
+    }
+
+    override suspend fun insertBed(bed: BedEntity) {
+        val propId = currentPropertyManager.getCurrentPropertyId()
+        val updated = bed.copy(
+            propertyId = if (bed.propertyId.isNotBlank() && bed.propertyId != "property_default") bed.propertyId else propId,
+            updatedAt = System.currentTimeMillis(),
+            syncStatus = "PENDING_UPLOAD"
+        )
+        bedDao.insertBed(updated)
+        syncCoordinator?.enqueueOperation("BED", "${updated.propertyId}_${updated.roomNumber}_${updated.bedId}", "CREATE")
+    }
+
+    override suspend fun updateBed(bed: BedEntity) {
+        val propId = currentPropertyManager.getCurrentPropertyId()
+        val updated = bed.copy(
+            propertyId = if (bed.propertyId.isNotBlank() && bed.propertyId != "property_default") bed.propertyId else propId,
+            updatedAt = System.currentTimeMillis(),
+            syncStatus = "PENDING_UPLOAD"
+        )
+        bedDao.updateBed(updated)
+        syncCoordinator?.enqueueOperation("BED", "${updated.propertyId}_${updated.roomNumber}_${updated.bedId}", "UPDATE")
+    }
+
+    override suspend fun getActiveAssignmentForBed(roomNumber: String, bedId: String): BedAssignmentEntity? {
+        val propId = currentPropertyManager.getCurrentPropertyId()
+        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        return bedAssignmentDao.getActiveAssignmentForBed(propId, roomNumber, bedId, todayStr)
+    }
+
+    override suspend fun getActiveAssignmentForTenant(tenantId: Int): BedAssignmentEntity? {
+        val propId = currentPropertyManager.getCurrentPropertyId()
+        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        return bedAssignmentDao.getActiveAssignmentForTenant(propId, tenantId, todayStr)
+    }
+
+    override suspend fun insertBedAssignment(assignment: BedAssignmentEntity) {
+        val propId = currentPropertyManager.getCurrentPropertyId()
+        val updated = assignment.copy(
+            propertyId = if (assignment.propertyId.isNotBlank() && assignment.propertyId != "property_default") assignment.propertyId else propId,
+            updatedAt = System.currentTimeMillis(),
+            syncStatus = "PENDING_UPLOAD"
+        )
+        bedAssignmentDao.insertAssignment(updated)
+        syncCoordinator?.enqueueOperation("BED_ASSIGNMENT", updated.assignmentId, "CREATE")
+    }
+
+    override suspend fun updateBedAssignment(assignment: BedAssignmentEntity) {
+        val propId = currentPropertyManager.getCurrentPropertyId()
+        val updated = assignment.copy(
+            propertyId = if (assignment.propertyId.isNotBlank() && assignment.propertyId != "property_default") assignment.propertyId else propId,
+            updatedAt = System.currentTimeMillis(),
+            syncStatus = "PENDING_UPLOAD"
+        )
+        bedAssignmentDao.updateAssignment(updated)
+        syncCoordinator?.enqueueOperation("BED_ASSIGNMENT", updated.assignmentId, "UPDATE")
     }
 
     override suspend fun insertRentPayment(payment: RentPaymentEntity) {
@@ -149,8 +237,8 @@ class TenantRepositoryImpl @Inject constructor(
                 updatedAt = System.currentTimeMillis(),
                 syncStatus = "PENDING_UPLOAD"
             )
-            val insertedId = rentPaymentDao.insertPayment(updated)
-            syncCoordinator?.enqueueOperation("PAYMENT", insertedId.toString(), "CREATE")
+            val newId = rentPaymentDao.insertPayment(updated)
+            syncCoordinator?.enqueueOperation("PAYMENT", newId.toString(), "CREATE")
         }
     }
 

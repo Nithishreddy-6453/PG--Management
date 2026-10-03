@@ -408,28 +408,18 @@ fun ExpenseDetailsScreen(
     }
 
     // Delete Confirmation Dialog
-    if (showDeleteConfirm) {
-        AlertDialog(
-            onDismissRequest = { showDeleteConfirm = false },
-            title = { Text(rememberTranslation("Delete")) },
-            text = { Text(rememberTranslation("Are you sure you want to delete this?")) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDeleteConfirm = false
-                        viewModel.onEvent(ExpenseDetailsUiEvent.DeleteExpense)
-                    }
-                ) {
-                    Text(rememberTranslation("Confirm"), color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) {
-                    Text(rememberTranslation("Cancel"))
-                }
-            }
-        )
-    }
+    com.example.core.designsystem.PgConfirmDialog(
+        isOpen = showDeleteConfirm,
+        title = rememberTranslation("Delete Expense?"),
+        message = rememberTranslation("Are you sure you want to delete this expense record? This will remove the transaction from monthly expense totals."),
+        confirmText = rememberTranslation("Delete"),
+        isDestructive = true,
+        onConfirm = {
+            showDeleteConfirm = false
+            viewModel.onEvent(ExpenseDetailsUiEvent.DeleteExpense)
+        },
+        onDismiss = { showDeleteConfirm = false }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

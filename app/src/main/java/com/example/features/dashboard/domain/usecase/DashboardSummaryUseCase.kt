@@ -1,5 +1,6 @@
 package com.example.features.dashboard.domain.usecase
 
+import androidx.compose.runtime.Immutable
 import com.example.data.database.BedAssignmentEntity
 import com.example.data.database.BedEntity
 import com.example.data.database.ExpenseEntity
@@ -13,10 +14,16 @@ import com.example.features.reports.domain.model.AttentionItem
 import com.example.features.reports.domain.model.OwnerOverviewReport
 import com.example.features.reports.domain.model.RentMetrics
 import com.example.features.reports.domain.model.ReportPeriod
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 import javax.inject.Inject
 
+@Immutable
 data class DashboardSummary(
     val occupancy: OccupancyStats = OccupancyStats(),
     val revenue: RevenueStats = RevenueStats(),
@@ -33,8 +40,9 @@ class DashboardSummaryUseCase @Inject constructor(
     private val repository: DashboardRepository,
     private val recentActivityUseCase: RecentActivityUseCase
 ) {
+    @OptIn(FlowPreview::class)
     operator fun invoke(): Flow<DashboardSummary> {
-        val calculatedDataFlow = combine(
+        return combine(
             repository.getCurrentPropertyFlow(),
             repository.getRoomsFlow(),
             repository.getBedsFlow(),
@@ -70,13 +78,8 @@ class DashboardSummaryUseCase @Inject constructor(
                 expenses = expenses
             )
 
-            report
-        }
+            val activities = recentActivityUseCase.computeActivities(tenants, payments, expenses)
 
-        return combine(
-            calculatedDataFlow,
-            recentActivityUseCase()
-        ) { report, activities ->
             val occ = OccupancyStats(
                 totalRooms = report.bedOccupancy.totalRooms,
                 occupiedRooms = report.bedOccupancy.occupiedBeds,
@@ -129,5 +132,8 @@ class DashboardSummaryUseCase @Inject constructor(
                 rentMetrics = report.rentMetrics
             )
         }
+        .debounce(50L)
+        .distinctUntilChanged()
+        .flowOn(Dispatchers.Default)
     }
 }

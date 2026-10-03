@@ -349,6 +349,7 @@ class ExcelManager @Inject constructor(
         var headerRowIndex = -1
         var nameCol = -1
         var roomCol = -1
+        var bedCol = -1
         var phoneCol = -1
         var rentCol = -1
         var joinDateCol = -1
@@ -361,6 +362,7 @@ class ExcelManager @Inject constructor(
                 val cell = row[j].trim().lowercase(Locale.getDefault())
                 if (cell.contains("name") && !cell.contains("room")) nameCol = j
                 if (cell.contains("room")) roomCol = j
+                if (cell.contains("bed") && !cell.contains("room")) bedCol = j
                 if (cell.contains("phone") || cell.contains("mobile") || cell.contains("contact")) phoneCol = j
                 if (cell.contains("rent") || cell.contains("amount") || cell.contains("fee")) rentCol = j
                 if (cell.contains("join") || cell.contains("move") || cell.contains("start")) joinDateCol = j
@@ -402,6 +404,7 @@ class ExcelManager @Inject constructor(
                 throw ImportValidationException("Room number is missing for '$name' on row $rowDisplayNumber.")
             }
 
+            val bedId = if (bedCol != -1) row.getOrNull(bedCol)?.trim().orEmpty() else ""
             val phone = if (phoneCol != -1) row.getOrNull(phoneCol)?.trim().orEmpty() else ""
             val rentStr = if (rentCol != -1) row.getOrNull(rentCol)?.trim().orEmpty() else ""
             val monthlyRent = if (rentStr.isNotBlank()) {
@@ -444,6 +447,7 @@ class ExcelManager @Inject constructor(
                     rowNumber = rowDisplayNumber,
                     name = name,
                     roomNumber = room,
+                    bedId = bedId,
                     phone = phone,
                     monthlyRent = monthlyRent,
                     joinDate = joinDate.ifBlank { todayStr },
@@ -481,6 +485,7 @@ class ExcelManager @Inject constructor(
         var importedCount = 0
         val currentPropId = tenantRepository.getCurrentPropertyId()
         val existingRooms = tenantRepository.getAllRooms()
+        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
 
         for (row in rows) {
             // Check if excluded or duplicate set to SKIP
@@ -503,26 +508,74 @@ class ExcelManager @Inject constructor(
 
             val isVacated = row.status.equals("Vacated", ignoreCase = true) ||
                     row.status.equals("Inactive", ignoreCase = true) ||
-                    row.vacateDate.isNotBlank()
+                    (row.vacateDate.isNotBlank() && row.vacateDate <= todayStr)
+
+            // Determine bed safely
+            val roomBeds = tenantRepository.getBedsForRoom(row.roomNumber).filter { !it.deleted }
+            val explicitBed = row.bedId.trim()
+            val targetBed = if (explicitBed.isNotBlank()) {
+                roomBeds.firstOrNull { it.bedId.equals(explicitBed, ignoreCase = true) }
+                    ?: run {
+                        val newBed = com.example.data.database.BedEntity(
+                            roomNumber = row.roomNumber,
+                            bedId = explicitBed,
+                            status = "AVAILABLE",
+                            propertyId = currentPropId
+                        )
+                        tenantRepository.insertBed(newBed)
+                        newBed
+                    }
+            } else {
+                // Pick first available bed
+                roomBeds.firstOrNull { it.status == "AVAILABLE" }
+                    ?: run {
+                        val nextNum = roomBeds.size + 1
+                        val newBedId = "Bed $nextNum"
+                        val newBed = com.example.data.database.BedEntity(
+                            roomNumber = row.roomNumber,
+                            bedId = newBedId,
+                            status = "AVAILABLE",
+                            propertyId = currentPropId
+                        )
+                        tenantRepository.insertBed(newBed)
+                        newBed
+                    }
+            }
 
             val tenantEntity = TenantEntity(
                 name = row.name,
                 phone = row.phone,
                 email = "",
                 emergencyContact = "",
-                roomNumber = row.roomNumber,
-                bedId = "Bed A",
+                roomNumber = if (isVacated) "" else row.roomNumber,
+                bedId = if (isVacated) "" else targetBed.bedId,
                 monthlyRent = row.monthlyRent,
                 securityDeposit = 0.0,
                 moveInDate = row.joinDate,
                 isKycUploaded = false,
                 kycDocType = "None",
+                leavingDate = row.vacateDate,
                 notes = if (row.vacateDate.isNotBlank()) "Vacate Date: ${row.vacateDate}" else "",
                 propertyId = currentPropId,
                 deleted = isVacated
             )
 
-            tenantRepository.insertTenant(tenantEntity)
+            val newId = tenantRepository.insertTenant(tenantEntity).toInt()
+
+            if (!isVacated && targetBed.status != "BLOCKED") {
+                val assignment = com.example.data.database.BedAssignmentEntity(
+                    tenantId = newId,
+                    roomNumber = row.roomNumber,
+                    bedId = targetBed.bedId,
+                    startDate = row.joinDate.ifBlank { todayStr },
+                    endDate = if (row.vacateDate.isNotBlank()) row.vacateDate else null,
+                    agreedRent = row.monthlyRent,
+                    propertyId = currentPropId
+                )
+                tenantRepository.insertBedAssignment(assignment)
+                tenantRepository.updateBed(targetBed.copy(status = "OCCUPIED"))
+            }
+
             importedCount++
         }
 

@@ -247,7 +247,15 @@ class MainActivity : ComponentActivity() {
                             DashboardScreen(
                                 viewModel = viewModel,
                                 dashboardViewModel = dashboardViewModel,
-                                onNavigate = { route -> navController.navigate(route) },
+                                onNavigate = { route ->
+                                    navController.navigate(route) {
+                                        popUpTo(navController.graph.startDestinationId) {
+                                            saveState = true
+                                        }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                },
                                 onLockRequested = {
                                     navController.navigate(Screen.PinLogin.route) {
                                         popUpTo(Screen.Dashboard.route) { inclusive = true }
@@ -312,7 +320,15 @@ class MainActivity : ComponentActivity() {
                                 onImportExcelClick = {
                                     navController.navigate(Screen.ExcelImport.route)
                                 },
-                                onNavigate = { route -> navController.navigate(route) }
+                                onNavigate = { route ->
+                                    navController.navigate(route) {
+                                        popUpTo(navController.graph.startDestinationId) {
+                                            saveState = true
+                                        }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                }
                             )
                         }
 

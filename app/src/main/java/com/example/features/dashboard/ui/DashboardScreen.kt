@@ -1,11 +1,9 @@
 package com.example.features.dashboard.ui
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,34 +13,27 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddHome
-import androidx.compose.material.icons.filled.Analytics
-import androidx.compose.material.icons.filled.Apps
-import androidx.compose.material.icons.filled.AttachMoney
+import androidx.compose.material.icons.filled.CurrencyRupee
 import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.EventBusy
 import androidx.compose.material.icons.filled.Group
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MeetingRoom
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Receipt
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Settings
@@ -55,7 +46,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -71,29 +61,28 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import com.example.core.language.rememberTranslation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.core.designsystem.AppBottomNavBar
+import com.example.core.designsystem.MainTab
+import com.example.core.language.AppLanguageManager
+import com.example.core.language.rememberTranslation
 import com.example.features.dashboard.domain.usecase.ActivityType
 import com.example.features.dashboard.domain.usecase.DashboardSummary
-import com.example.features.dashboard.domain.usecase.OccupancyStats
 import com.example.features.dashboard.domain.usecase.RecentActivity
 import com.example.features.dashboard.domain.usecase.UpcomingVacancyItem
 import com.example.features.properties.ui.components.AddPropertyDialog
 import com.example.features.properties.ui.components.PropertySelectorBottomSheet
 import com.example.features.properties.ui.viewmodel.PropertyViewModel
+import com.example.features.reports.domain.model.AttentionItem
+import com.example.features.reports.domain.model.AttentionType
 import com.example.navigation.Screen
 import com.example.ui.viewmodel.PgViewModel
 import java.text.SimpleDateFormat
@@ -119,7 +108,7 @@ fun DashboardScreen(
     val propertySheetState = rememberModalBottomSheetState()
     var showPropertySheet by remember { mutableStateOf(false) }
     var showAddPropertyDialog by remember { mutableStateOf(false) }
-    val selectedLanguage by com.example.core.language.AppLanguageManager.languageFlow.collectAsState()
+    val selectedLanguage by AppLanguageManager.languageFlow.collectAsState()
 
     val activePgName = currentProperty?.propertyName ?: profile?.pgName?.ifBlank { "Reddy PG" } ?: "Reddy PG"
     val pgLocation = currentProperty?.city?.takeIf { it.isNotBlank() }
@@ -131,21 +120,17 @@ fun DashboardScreen(
     val greeting = remember(currentHour, selectedLanguage) {
         if (selectedLanguage == "తెలుగు") {
             when {
-                currentHour < 12 -> "శుభోదయం,"
-                currentHour < 17 -> "శుభ మధ్యాహ్నం,"
-                else -> "శుభ సాయంత్రం,"
+                currentHour < 12 -> "శుభోదయం"
+                currentHour < 17 -> "శుభ మధ్యాహ్నం"
+                else -> "శుభ సాయంత్రం"
             }
         } else {
             when {
-                currentHour < 12 -> "Good Morning,"
-                currentHour < 17 -> "Good Afternoon,"
-                else -> "Good Evening,"
+                currentHour < 12 -> "Good morning"
+                currentHour < 17 -> "Good afternoon"
+                else -> "Good evening"
             }
         }
-    }
-
-    val formattedDate = remember {
-        SimpleDateFormat("EEE, MMM d, yyyy", Locale.getDefault()).format(Date())
     }
 
     if (showPropertySheet) {
@@ -185,24 +170,21 @@ fun DashboardScreen(
         )
     }
 
-    val bgScreenColor = Color(0xFFF6F8FB)
-
     Scaffold(
         bottomBar = {
-            DashboardBottomBar(
-                currentRoute = Screen.Dashboard.route,
-                onNavigate = onNavigate,
-                selectedLanguage = selectedLanguage
+            AppBottomNavBar(
+                currentTab = MainTab.HOME,
+                onNavigate = onNavigate
             )
         },
-        containerColor = bgScreenColor,
+        containerColor = MaterialTheme.colorScheme.background,
         modifier = modifier.testTag("dashboard_screen_container")
     ) { innerPadding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .background(bgScreenColor)
+                .background(MaterialTheme.colorScheme.background)
         ) {
             AnimatedContent(targetState = uiState, label = "DashboardStateAnimation") { state ->
                 when (state) {
@@ -225,12 +207,10 @@ fun DashboardScreen(
                         DashboardContent(
                             ownerName = ownerName,
                             greeting = greeting,
-                            formattedDate = formattedDate,
                             selectedLanguage = selectedLanguage,
-                            onLanguageSelect = { com.example.core.language.AppLanguageManager.setLanguage(it) },
+                            onLanguageSelect = { AppLanguageManager.setLanguage(it) },
                             summary = state.data,
                             onNavigate = onNavigate,
-                            onLockRequested = onLockRequested,
                             activePgName = activePgName,
                             pgLocation = pgLocation,
                             onSwitchProperty = { showPropertySheet = true },
@@ -248,35 +228,37 @@ fun DashboardScreen(
 fun DashboardContent(
     ownerName: String,
     greeting: String,
-    formattedDate: String,
     selectedLanguage: String,
     onLanguageSelect: (String) -> Unit,
     summary: DashboardSummary,
     onNavigate: (String) -> Unit,
-    onLockRequested: () -> Unit,
     activePgName: String,
     pgLocation: String,
     onSwitchProperty: () -> Unit,
     activeBillingMonth: String,
     onSelectBillingMonth: (String) -> Unit
 ) {
-    val initialLetter = activePgName.trim().firstOrNull()?.toString()?.uppercase() ?: "R"
+    val initialLetter = activePgName.trim().firstOrNull()?.toString()?.uppercase() ?: "P"
+    val isTe = selectedLanguage == "తెలుగు"
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp)
             .testTag("dashboard_scroll_content"),
-        contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
+        contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Top Header
+        // ==========================================
+        // 1. COMPACT HEADER
+        // ==========================================
         item {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
             ) {
+                // Top row: Greeting & PG Info + Actions (Language, Settings)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -290,32 +272,35 @@ fun DashboardContent(
                         // PG Avatar
                         Box(
                             modifier = Modifier
-                                .size(46.dp)
+                                .size(44.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFFFFE4D6))
-                                .border(1.5.dp, Color(0xFFFFD1BA), CircleShape)
+                                .background(MaterialTheme.colorScheme.primaryContainer)
+                                .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f), CircleShape)
                                 .clickable { onSwitchProperty() },
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = initialLetter,
-                                color = Color(0xFF9A3412),
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 19.sp
+                                    fontSize = 18.sp
                                 )
                             )
                         }
 
-                        Spacer(modifier = Modifier.width(12.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
 
                         Column {
                             Text(
-                                text = greeting,
+                                text = "$greeting, $ownerName",
                                 style = MaterialTheme.typography.bodySmall.copy(
-                                    color = Color(0xFF64748B),
-                                    fontSize = 12.5.sp
-                                )
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -328,9 +313,9 @@ fun DashboardContent(
                                 Text(
                                     text = activePgName,
                                     style = MaterialTheme.typography.titleMedium.copy(
-                                        color = Color(0xFF0F172A),
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = 17.5.sp
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 16.sp
                                     ),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -338,73 +323,41 @@ fun DashboardContent(
                                 Spacer(modifier = Modifier.width(3.dp))
                                 Icon(
                                     imageVector = Icons.Default.KeyboardArrowDown,
-                                    contentDescription = "Switch PG Property",
-                                    tint = Color(0xFF0F172A),
+                                    contentDescription = "Switch Property",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
-                            Text(
-                                text = pgLocation,
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    color = Color(0xFF64748B),
-                                    fontSize = 11.5.sp
-                                ),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                            if (pgLocation.isNotBlank()) {
+                                Text(
+                                    text = pgLocation,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = MaterialTheme.colorScheme.outline,
+                                        fontSize = 11.sp
+                                    ),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
 
-                    // Right Actions: Language Toggle, Notification, Settings
+                    // Right Actions: Language Toggle & Settings Gear
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // Language Toggle Pill [ EN | తెలుగు ]
                         LanguageTogglePill(
                             selectedLanguage = selectedLanguage,
                             onLanguageSelect = onLanguageSelect
                         )
 
-                        // Notification Icon with Red Dot
-                        Surface(
-                            shape = CircleShape,
-                            color = Color.White,
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                            shadowElevation = 0.5.dp,
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Notifications,
-                                    contentDescription = "Notifications",
-                                    tint = Color(0xFF0F172A),
-                                    modifier = Modifier.size(19.dp)
-                                )
-                                // Red Notification Dot
-                                Box(
-                                    modifier = Modifier
-                                        .size(7.dp)
-                                        .align(Alignment.TopEnd)
-                                        .padding(top = 2.dp, end = 2.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFFEF4444))
-                                )
-                            }
-                        }
-
-                        // Settings Gear
                         Surface(
                             onClick = { onNavigate(Screen.SettingsHome.route) },
                             shape = CircleShape,
-                            color = Color.White,
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                            shadowElevation = 0.5.dp,
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
                             modifier = Modifier
-                                .size(36.dp)
+                                .size(40.dp)
                                 .testTag("dashboard_settings_button")
                         ) {
                             Box(
@@ -414,8 +367,8 @@ fun DashboardContent(
                                 Icon(
                                     imageVector = Icons.Outlined.Settings,
                                     contentDescription = "Settings",
-                                    tint = Color(0xFF0F172A),
-                                    modifier = Modifier.size(19.dp)
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
@@ -424,179 +377,60 @@ fun DashboardContent(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Date Chip below header
+                // Bottom row of Header: Current Billing Month Selector Pill
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color.White,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                        shadowElevation = 0.5.dp,
-                        modifier = Modifier.padding(top = 2.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.CalendarToday,
-                                contentDescription = null,
-                                tint = Color(0xFF0F172A),
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = formattedDate,
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = Color(0xFF334155)
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // 2. QUICK ACTIONS
-        item {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = if (selectedLanguage == "తెలుగు") "త్వరిత చర్యలు" else "Quick Actions",
+                        text = if (isTe) "డాష్‌బోర్డ్" else "Dashboard",
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A),
-                            fontSize = 17.sp
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = 18.sp
                         )
                     )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.clickable { onNavigate(Screen.Rooms.route) }
-                    ) {
-                        Text(
-                            text = if (selectedLanguage == "తెలుగు") "అన్నీ చూడండి" else "See all",
-                            style = MaterialTheme.typography.labelLarge.copy(
-                                color = Color(0xFF2563EB),
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 13.sp
-                            )
-                        )
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = "See all",
-                            tint = Color(0xFF2563EB),
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                    var monthDropdownExpanded by remember { mutableStateOf(false) }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // 1. Add Room
-                    QuickActionPastelCard(
-                        title = if (selectedLanguage == "తెలుగు") "రూమ్\nజోడించు" else "Add\nRoom",
-                        icon = Icons.Default.AddHome,
-                        iconTint = Color(0xFF2563EB),
-                        bgColor = Color(0xFFEBF3FE),
-                        onClick = { onNavigate(Screen.AddRoom.route) },
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    // 2. Add Tenant
-                    QuickActionPastelCard(
-                        title = if (selectedLanguage == "తెలుగు") "అద్దెదారు\nజోడించు" else "Add\nTenant",
-                        icon = Icons.Default.Group,
-                        iconTint = Color(0xFF16A34A),
-                        bgColor = Color(0xFFEDF9F0),
-                        onClick = { onNavigate(Screen.AddTenant.route) },
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    // 3. Collect Rent
-                    QuickActionPastelCard(
-                        title = if (selectedLanguage == "తెలుగు") "అద్దె\nవసూలు" else "Collect\nRent",
-                        icon = Icons.Default.AttachMoney,
-                        iconTint = Color(0xFFEA580C),
-                        bgColor = Color(0xFFFEF6E9),
-                        onClick = { onNavigate(Screen.RentLedger.route) },
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    // 4. Add Expense
-                    QuickActionPastelCard(
-                        title = if (selectedLanguage == "తెలుగు") "ఖర్చు\nజోడించు" else "Add\nExpense",
-                        icon = Icons.Default.Receipt,
-                        iconTint = Color(0xFF9333EA),
-                        bgColor = Color(0xFFF6EEFD),
-                        onClick = { onNavigate(Screen.AddExpense.route) },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-        }
-
-        // 3. OVERVIEW CARDS
-        item {
-            var monthDropdownExpanded by remember { mutableStateOf(false) }
-
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = if (selectedLanguage == "తెలుగు") "అవలోకనం" else "Overview",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A),
-                            fontSize = 17.sp
-                        )
-                    )
                     Box {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
                             modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFFF1F5F9))
+                                .clip(RoundedCornerShape(12.dp))
                                 .clickable { monthDropdownExpanded = true }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .testTag("dashboard_billing_month_selector")
                         ) {
-                            Icon(
-                                imageVector = Icons.Outlined.CalendarToday,
-                                contentDescription = null,
-                                tint = Color(0xFF1E293B),
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Spacer(modifier = Modifier.width(5.dp))
-                            Text(
-                                text = activeBillingMonth,
-                                style = MaterialTheme.typography.labelLarge.copy(
-                                    color = Color(0xFF1E293B),
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 12.5.sp
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.CalendarToday,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(14.dp)
                                 )
-                            )
-                            Spacer(modifier = Modifier.width(2.dp))
-                            Icon(
-                                imageVector = Icons.Default.KeyboardArrowDown,
-                                contentDescription = "Select Billing Month",
-                                tint = Color(0xFF475569),
-                                modifier = Modifier.size(15.dp)
-                            )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = activeBillingMonth,
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 12.5.sp
+                                    )
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = Icons.Default.KeyboardArrowDown,
+                                    contentDescription = "Select Month",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
 
                         DropdownMenu(
@@ -619,7 +453,7 @@ fun DashboardContent(
                                         Text(
                                             text = month,
                                             fontWeight = if (month == activeBillingMonth) FontWeight.Bold else FontWeight.Normal,
-                                            color = if (month == activeBillingMonth) Color(0xFF1769D1) else Color(0xFF1E293B)
+                                            color = if (month == activeBillingMonth) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                                         )
                                     },
                                     onClick = {
@@ -631,93 +465,425 @@ fun DashboardContent(
                         }
                     }
                 }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // 2x2 Grid of Overview Cards
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    // Card 1: Tenants / Total PG Capacity (Section 3 Requirement)
-                    val activeTenants = summary.occupancy.activeTenantsCount
-                    val totalCapacity = summary.occupancy.totalPgCapacity
-                    val vacancies = summary.occupancy.vacanciesCount
-                    val occupancyPercentage = summary.occupancy.homeOccupancyPercentage
-                    val occupancyRatio = if (totalCapacity > 0) (activeTenants.toFloat() / totalCapacity.toFloat()).coerceIn(0f, 1f) else 0f
-
-                    val occupancySubtitle = if (selectedLanguage == "తెలుగు") {
-                        "${String.format(Locale.US, "%.1f", occupancyPercentage)}% ఆక్రమణ • $vacancies ఖాళీ" + (if (vacancies == 1) "" else "లు")
-                    } else {
-                        "${String.format(Locale.US, "%.1f", occupancyPercentage)}% Occupancy • $vacancies Vacanc" + (if (vacancies == 1) "y" else "ies")
-                    }
-
-                    OverviewOccupancyCard(
-                        title = if (selectedLanguage == "తెలుగు") "అద్దెదారులు / సామర్థ్యం" else "Tenants / Total Capacity",
-                        value = "$activeTenants / $totalCapacity Tenants",
-                        subtitle = occupancySubtitle,
-                        progress = occupancyRatio,
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    // Card 2: Monthly Revenue / Rent Received
-                    val revSubtitle = if (summary.revenue.previousDuesReceived > 0) {
-                        "+ ₹${String.format(Locale.US, "%,.0f", summary.revenue.previousDuesReceived)} Prev Dues"
-                    } else {
-                        activeBillingMonth
-                    }
-
-                    OverviewRevenueCard(
-                        title = if (selectedLanguage == "తెలుగు") "వసూలైన అద్దె" else "Rent Received",
-                        value = "₹${String.format(Locale.US, "%,.0f", summary.revenue.monthlyRevenue)}",
-                        subtitle = revSubtitle,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    // Card 3: Pending Rent / Rent Still to Collect
-                    val pendingAmount = summary.revenue.pendingRent
-                    val pendingCount = if (pendingAmount > 0) 1 else 0
-
-                    OverviewPendingRentCard(
-                        title = if (selectedLanguage == "తెలుగు") "ఇంకా వసూలు చేయాల్సినది" else "Rent Still to Collect",
-                        value = "₹${String.format(Locale.US, "%,.0f", pendingAmount)}",
-                        subtitle = if (pendingCount > 0) "$activeBillingMonth remaining" else "All rent collected",
-                        onClick = { onNavigate(Screen.RentLedger.route) },
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    // Card 4: Monthly Expenses
-                    val profitLeft = summary.profit.netProfit
-                    OverviewExpensesCard(
-                        title = if (selectedLanguage == "తెలుగు") "ఖర్చులు" else "Expenses",
-                        value = "₹${String.format(Locale.US, "%,.0f", summary.expenses.totalExpenses)}",
-                        subtitle = "Left: ₹${String.format(Locale.US, "%,.0f", profitLeft)}",
-                        onClick = { onNavigate(Screen.Expenses.route) },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
             }
         }
 
-        // WHAT NEEDS ATTENTION (Section 24)
-        if (summary.whatNeedsAttention.isNotEmpty()) {
-            item {
-                WhatNeedsAttentionCard(
-                    attentionItems = summary.whatNeedsAttention,
-                    selectedLanguage = selectedLanguage,
-                    onNavigate = onNavigate
+        // ==========================================
+        // 2. QUICK ACTIONS (Compact 2x2 Layout)
+        // ==========================================
+        item {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = if (isTe) "త్వరిత చర్యలు" else "Quick Actions",
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 14.sp
+                    )
                 )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Action 1: Add Room
+                    CompactQuickActionButton(
+                        label = if (isTe) "రూమ్ జోడించు" else "Add Room",
+                        icon = Icons.Default.AddHome,
+                        tint = Color(0xFF2563EB),
+                        onClick = { onNavigate(Screen.AddRoom.route) },
+                        testTag = "quick_action_add_room",
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    // Action 2: Add Tenant
+                    CompactQuickActionButton(
+                        label = if (isTe) "అద్దెదారుని జోడించు" else "Add Tenant",
+                        icon = Icons.Default.PersonAdd,
+                        tint = Color(0xFF16A34A),
+                        onClick = { onNavigate(Screen.AddTenant.route) },
+                        testTag = "quick_action_add_tenant",
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Action 3: Collect Rent
+                    CompactQuickActionButton(
+                        label = if (isTe) "అద్దె వసూలు" else "Collect Rent",
+                        icon = Icons.Default.CurrencyRupee,
+                        tint = Color(0xFFEA580C),
+                        onClick = { onNavigate(Screen.RecordPayment.route) },
+                        testTag = "quick_action_collect_rent",
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    // Action 4: Add Expense
+                    CompactQuickActionButton(
+                        label = if (isTe) "ఖర్చు జోడించు" else "Add Expense",
+                        icon = Icons.Default.ReceiptLong,
+                        tint = Color(0xFF9333EA),
+                        onClick = { onNavigate(Screen.AddExpense.route) },
+                        testTag = "quick_action_add_expense",
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         }
 
-        // 4. UPCOMING VACANCIES
+        // ==========================================
+        // 3. FINANCIAL SNAPSHOT (Compact 2x2 Grid)
+        // ==========================================
+        item {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (isTe) "ఆర్థిక సారాంశం" else "Financial Snapshot",
+                        style = MaterialTheme.typography.titleSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = 14.sp
+                        )
+                    )
+                    Text(
+                        text = activeBillingMonth,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 11.5.sp
+                        )
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // 2x2 Grid
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // 1. Rent Received
+                    CompactFinancialCard(
+                        title = if (isTe) "వసూలైన అద్దె" else "Rent Received",
+                        amount = summary.revenue.monthlyRevenue,
+                        subtitle = if (isTe) "ఈ నెల" else "This month",
+                        accentColor = Color(0xFF16A34A),
+                        onClick = null,
+                        testTag = "fin_card_rent_received",
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    // 2. Rent Outstanding
+                    CompactFinancialCard(
+                        title = if (isTe) "బకాయి అద్దె" else "Rent Outstanding",
+                        amount = summary.revenue.pendingRent,
+                        subtitle = if (isTe) "ఈ నెల" else "This month",
+                        accentColor = if (summary.revenue.pendingRent > 0) Color(0xFFDC2626) else MaterialTheme.colorScheme.onSurfaceVariant,
+                        onClick = { onNavigate(Screen.RentLedger.route) },
+                        testTag = "fin_card_rent_outstanding",
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // 3. Expenses
+                    CompactFinancialCard(
+                        title = if (isTe) "ఖర్చులు" else "Expenses",
+                        amount = summary.expenses.totalExpenses,
+                        subtitle = if (isTe) "ఈ నెల" else "This month",
+                        accentColor = Color(0xFF9333EA),
+                        onClick = { onNavigate(Screen.Expenses.route) },
+                        testTag = "fin_card_expenses",
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    // 4. Balance After Expenses
+                    CompactFinancialCard(
+                        title = if (isTe) "ఖర్చుల తర్వాత నికర మొత్తం" else "Balance After Expenses",
+                        amount = summary.profit.netProfit,
+                        subtitle = if (isTe) "నికర మొత్తం" else "Net balance",
+                        accentColor = if (summary.profit.netProfit >= 0) Color(0xFF2563EB) else Color(0xFFDC2626),
+                        onClick = null,
+                        testTag = "fin_card_balance_after_expenses",
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                // Previous Dues Indicator if applicable
+                if (summary.revenue.previousDuesReceived > 0) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFFECFDF5),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFA7F3D0)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "•",
+                                color = Color(0xFF059669),
+                                fontWeight = FontWeight.ExtraBold,
+                                modifier = Modifier.padding(end = 6.dp)
+                            )
+                            Text(
+                                text = if (isTe) {
+                                    "+ ₹${String.format(Locale.US, "%,.0f", summary.revenue.previousDuesReceived)} మునుపటి బకాయిలు వసూలయ్యాయి"
+                                } else {
+                                    "+ ₹${String.format(Locale.US, "%,.0f", summary.revenue.previousDuesReceived)} previous dues collected"
+                                },
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = Color(0xFF047857),
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 12.sp
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // ==========================================
+        // 4. OCCUPANCY (Tenants / Total PG Capacity)
+        // ==========================================
+        item {
+            val activeTenants = summary.occupancy.activeTenantsCount
+            val totalCapacity = summary.occupancy.totalPgCapacity
+            val vacancies = summary.occupancy.vacanciesCount
+            val occupancyPercentage = summary.occupancy.homeOccupancyPercentage
+            val occupancyRatio = if (totalCapacity > 0) (activeTenants.toFloat() / totalCapacity.toFloat()).coerceIn(0f, 1f) else 0f
+
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onNavigate(Screen.Rooms.route) }
+                    .testTag("dashboard_occupancy_card")
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Group,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = if (isTe) "ఆక్రమణ" else "Occupancy",
+                                style = MaterialTheme.typography.titleSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontSize = 13.5.sp
+                                )
+                            )
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(
+                                text = if (isTe) "గదుల వివరాలు" else "View Rooms",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 12.sp
+                                )
+                            )
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        // Main Primary Metric: 7 / 8 Tenants
+                        Row(
+                            verticalAlignment = Alignment.Bottom,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "$activeTenants / $totalCapacity",
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontSize = 22.sp
+                                )
+                            )
+                            Text(
+                                text = if (isTe) "అద్దెదారులు" else "Tenants",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 13.sp
+                                )
+                            )
+                        }
+
+                        // Subtitle: 87.5% occupancy · 1 vacancy
+                        val vacancyText = if (isTe) {
+                            "${String.format(Locale.US, "%.1f", occupancyPercentage)}% ఆక్రమణ · $vacancies ఖాళీ" + (if (vacancies == 1) "" else "లు")
+                        } else {
+                            "${String.format(Locale.US, "%.1f", occupancyPercentage)}% occupancy · $vacancies vacanc" + (if (vacancies == 1) "y" else "ies")
+                        }
+
+                        Text(
+                            text = vacancyText,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 12.sp
+                            )
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    LinearProgressIndicator(
+                        progress = { occupancyRatio },
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                    )
+                }
+            }
+        }
+
+        // ==========================================
+        // 5. NEEDS ATTENTION (Compact Navigational Rows)
+        // ==========================================
+        val hasAttentionItems = summary.whatNeedsAttention.isNotEmpty()
+        if (hasAttentionItems) {
+            item {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = if (isTe) "దృష్టి సారించాల్సినవి" else "Needs Attention",
+                        style = MaterialTheme.typography.titleSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = 14.sp
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        summary.whatNeedsAttention.forEach { item ->
+                            val (dotColor, targetRoute) = when (item.type) {
+                                AttentionType.RENT_REMAINING -> Pair(Color(0xFFDC2626), Screen.RentLedger.route)
+                                AttentionType.VACATING_SOON -> Pair(Color(0xFFEA580C), Screen.Tenants.route)
+                                AttentionType.VACANCY -> Pair(Color(0xFF2563EB), Screen.Rooms.route)
+                                AttentionType.UNPAID_EXPENSE -> Pair(Color(0xFF9333EA), Screen.Expenses.route)
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        val route = item.actionRoute ?: targetRoute
+                                        onNavigate(route)
+                                    }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Status Dot
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(dotColor)
+                                    )
+
+                                    Spacer(modifier = Modifier.width(10.dp))
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = item.title,
+                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                fontSize = 13.sp
+                                            ),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = item.subtitle,
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                fontSize = 11.5.sp
+                                            ),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ==========================================
+        // 6. UPCOMING MOVE-OUTS (Detailed List)
+        // ==========================================
         item {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Row(
@@ -727,28 +893,27 @@ fun DashboardContent(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text(
-                            text = if (selectedLanguage == "తెలుగు") "రాబోయే ఖాళీలు" else "Upcoming Vacancies",
-                            style = MaterialTheme.typography.titleMedium.copy(
+                            text = if (isTe) "రాబోయే నిష్క్రమణలు" else "Upcoming Move-outs",
+                            style = MaterialTheme.typography.titleSmall.copy(
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0F172A),
-                                fontSize = 17.sp
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontSize = 14.sp
                             )
                         )
                         if (summary.upcomingVacancies.isNotEmpty()) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(Color(0xFFFEF3C7))
-                                    .padding(horizontal = 7.dp, vertical = 2.dp)
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFFFEF3C7)
                             ) {
                                 Text(
                                     text = "${summary.upcomingVacancies.size}",
-                                    color = Color(0xFFD97706),
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Bold
+                                    color = Color(0xFFB45309),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
                             }
                         }
@@ -759,29 +924,29 @@ fun DashboardContent(
                         modifier = Modifier.clickable { onNavigate(Screen.Tenants.route) }
                     ) {
                         Text(
-                            text = if (selectedLanguage == "తెలుగు") "అన్నీ చూడండి" else "See all",
-                            style = MaterialTheme.typography.labelLarge.copy(
-                                color = Color(0xFF2563EB),
+                            text = if (isTe) "అన్నీ చూడండి" else "See all",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.SemiBold,
-                                fontSize = 13.sp
+                                fontSize = 12.sp
                             )
                         )
-                        Spacer(modifier = Modifier.width(3.dp))
+                        Spacer(modifier = Modifier.width(2.dp))
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                             contentDescription = "See all",
-                            tint = Color(0xFF2563EB),
-                            modifier = Modifier.size(14.dp)
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(13.dp)
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEDF2F7)),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                     elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -792,21 +957,22 @@ fun DashboardContent(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 18.dp),
+                                    .padding(vertical = 16.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = if (selectedLanguage == "తెలుగు") "రాబోయే ఖాళీలు ఏవీ షెడ్యూల్ చేయబడలేదు" else "No upcoming vacancies scheduled",
+                                    text = if (isTe) "షెడ్యూల్ చేసిన నిష్క్రమణలు లేవు" else "No upcoming move-outs scheduled",
                                     style = MaterialTheme.typography.bodySmall.copy(
-                                        color = Color(0xFF94A3B8),
-                                        fontSize = 13.sp
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 12.5.sp
                                     )
                                 )
                             }
                         } else {
                             summary.upcomingVacancies.take(5).forEachIndexed { index, vacancy ->
-                                UpcomingVacancyRow(
+                                UpcomingMoveOutRow(
                                     vacancy = vacancy,
+                                    isTe = isTe,
                                     isLast = index == summary.upcomingVacancies.take(5).lastIndex,
                                     onClick = {
                                         onNavigate(Screen.TenantDetails.createRoute(vacancy.tenantId))
@@ -819,7 +985,9 @@ fun DashboardContent(
             }
         }
 
-        // 5. RECENT ACTIVITY
+        // ==========================================
+        // 7. RECENT ACTIVITY (Meaningful Events)
+        // ==========================================
         item {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Row(
@@ -828,42 +996,42 @@ fun DashboardContent(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (selectedLanguage == "తెలుగు") "ఇటీవలి కార్యకలాపాలు" else "Recent Activity",
-                        style = MaterialTheme.typography.titleMedium.copy(
+                        text = if (isTe) "ఇటీవలి కార్యకలాపాలు" else "Recent Activity",
+                        style = MaterialTheme.typography.titleSmall.copy(
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A),
-                            fontSize = 17.sp
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = 14.sp
                         )
                     )
+
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.clickable { onNavigate(Screen.RentLedger.route) }
                     ) {
                         Text(
-                            text = if (selectedLanguage == "తెలుగు") "అన్నీ చూడండి" else "View All",
-                            style = MaterialTheme.typography.labelLarge.copy(
-                                color = Color(0xFF2563EB),
+                            text = if (isTe) "అన్నీ చూడండి" else "View All",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.SemiBold,
-                                fontSize = 13.sp
+                                fontSize = 12.sp
                             )
                         )
-                        Spacer(modifier = Modifier.width(3.dp))
+                        Spacer(modifier = Modifier.width(2.dp))
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                             contentDescription = "View All",
-                            tint = Color(0xFF2563EB),
-                            modifier = Modifier.size(14.dp)
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(13.dp)
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-                // Card container holding activity items
                 Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEDF2F7)),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                     elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -874,21 +1042,22 @@ fun DashboardContent(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 24.dp),
+                                    .padding(vertical = 18.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = if (selectedLanguage == "తెలుగు") "కార్యకలాపాలు ఏవీ కనుగొనబడలేదు" else "No recent activities recorded",
+                                    text = if (isTe) "కార్యకలాపాలు ఏవీ లేవు" else "No recent activity recorded",
                                     style = MaterialTheme.typography.bodySmall.copy(
-                                        color = Color(0xFF94A3B8),
-                                        fontSize = 13.sp
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 12.5.sp
                                     )
                                 )
                             }
                         } else {
                             summary.recentActivities.take(6).forEachIndexed { index, activity ->
-                                RecentActivityRow(
+                                MeaningfulActivityRow(
                                     activity = activity,
+                                    isTe = isTe,
                                     isLast = index == summary.recentActivities.take(6).lastIndex,
                                     onClick = {
                                         when (activity.type) {
@@ -909,6 +1078,142 @@ fun DashboardContent(
 }
 
 /**
+ * Compact Quick Action Button
+ */
+@Composable
+private fun CompactQuickActionButton(
+    label: String,
+    icon: ImageVector,
+    tint: Color,
+    onClick: () -> Unit,
+    testTag: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        shadowElevation = 0.5.dp,
+        modifier = modifier
+            .height(52.dp)
+            .testTag(testTag)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(tint.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = tint,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 12.sp
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+/**
+ * Compact Financial Card for 2x2 Snapshot
+ */
+@Composable
+private fun CompactFinancialCard(
+    title: String,
+    amount: Double,
+    subtitle: String,
+    accentColor: Color,
+    onClick: (() -> Unit)?,
+    testTag: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = { onClick?.invoke() },
+        enabled = onClick != null,
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        shadowElevation = 0.5.dp,
+        modifier = modifier
+            .height(84.dp)
+            .testTag(testTag)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (onClick != null) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+
+            Text(
+                text = "₹${String.format(Locale.US, "%,.0f", amount)}",
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    color = accentColor,
+                    fontSize = 17.sp
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    color = MaterialTheme.colorScheme.outline,
+                    fontSize = 10.5.sp
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+/**
  * Top-Right Language Toggle Capsule [ EN | తెలుగు ]
  */
 @Composable
@@ -917,51 +1222,48 @@ private fun LanguageTogglePill(
     onLanguageSelect: (String) -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(18.dp),
-        color = Color.White,
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
-        shadowElevation = 0.5.dp
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
     ) {
         Row(
             modifier = Modifier.padding(2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // EN Pill
             val isEn = selectedLanguage == "EN"
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(if (isEn) Color(0xFF2563EB) else Color.Transparent)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (isEn) MaterialTheme.colorScheme.primary else Color.Transparent)
                     .clickable { onLanguageSelect("EN") }
-                    .padding(horizontal = 9.dp, vertical = 4.dp),
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = "EN",
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        color = if (isEn) Color.White else Color(0xFF64748B),
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = if (isEn) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = if (isEn) FontWeight.Bold else FontWeight.Medium,
-                        fontSize = 11.5.sp
+                        fontSize = 11.sp
                     )
                 )
             }
 
-            // Telugu Pill
             val isTe = selectedLanguage == "తెలుగు"
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(if (isTe) Color(0xFF2563EB) else Color.Transparent)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (isTe) MaterialTheme.colorScheme.primary else Color.Transparent)
                     .clickable { onLanguageSelect("తెలుగు") }
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                    .padding(horizontal = 7.dp, vertical = 3.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = "తెలుగు",
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        color = if (isTe) Color.White else Color(0xFF64748B),
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = if (isTe) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = if (isTe) FontWeight.Bold else FontWeight.Medium,
-                        fontSize = 11.5.sp
+                        fontSize = 11.sp
                     )
                 )
             }
@@ -970,591 +1272,36 @@ private fun LanguageTogglePill(
 }
 
 /**
- * 1. Quick Action Pastel Card
+ * Upcoming Move-out Row
  */
 @Composable
-private fun QuickActionPastelCard(
-    title: String,
-    icon: ImageVector,
-    iconTint: Color,
-    bgColor: Color,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(16.dp),
-        color = bgColor,
-        shadowElevation = 0.dp,
-        modifier = modifier.height(118.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(10.dp),
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            // Icon
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = iconTint,
-                modifier = Modifier.size(28.dp)
-            )
-
-            // Title and Forward Arrow
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = Color(0xFF1E293B),
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 12.sp,
-                        lineHeight = 15.sp
-                    ),
-                    maxLines = 2
-                )
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = Color(0xFF64748B),
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-        }
-    }
-}
-
-/**
- * 2. Overview Card: Rooms Occupied
- */
-@Composable
-private fun OverviewOccupancyCard(
-    title: String,
-    value: String,
-    subtitle: String,
-    progress: Float,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEDF2F7)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
-        modifier = modifier.height(140.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(14.dp),
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            // Icon + Title
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFEBF3FE)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.MeetingRoom,
-                        contentDescription = null,
-                        tint = Color(0xFF2563EB),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = Color(0xFF64748B),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            // Big Stat
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF0F172A),
-                    fontSize = 22.sp
-                )
-            )
-
-            // Subtitle + Progress Bar
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = Color(0xFF64748B),
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                )
-                LinearProgressIndicator(
-                    progress = { progress.coerceIn(0f, 1f) },
-                    color = Color(0xFF2563EB),
-                    trackColor = Color(0xFFE2E8F0),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(6.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                )
-            }
-        }
-    }
-}
-
-/**
- * 3. Overview Card: Monthly Revenue with Upward Sparkline
- */
-@Composable
-private fun OverviewRevenueCard(
-    title: String,
-    value: String,
-    subtitle: String,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEDF2F7)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
-        modifier = modifier.height(140.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(14.dp),
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            // Icon + Title
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFEDF9F0)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "₹",
-                        color = Color(0xFF16A34A),
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp
-                        )
-                    )
-                }
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = Color(0xFF64748B),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            // Big Stat
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF16A34A),
-                    fontSize = 22.sp
-                )
-            )
-
-            // Subtitle + Mini Trend Line Canvas
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = Color(0xFF16A34A),
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                )
-
-                // Smooth green upward curve
-                Canvas(
-                    modifier = Modifier
-                        .width(64.dp)
-                        .height(20.dp)
-                ) {
-                    val w = size.width
-                    val h = size.height
-                    val path = Path().apply {
-                        moveTo(0f, h * 0.8f)
-                        cubicTo(w * 0.35f, h * 0.75f, w * 0.65f, h * 0.3f, w, h * 0.1f)
-                    }
-                    val fillPath = Path().apply {
-                        addPath(path)
-                        lineTo(w, h)
-                        lineTo(0f, h)
-                        close()
-                    }
-                    drawPath(
-                        path = fillPath,
-                        brush = Brush.verticalGradient(
-                            colors = listOf(Color(0xFF16A34A).copy(alpha = 0.25f), Color.Transparent)
-                        )
-                    )
-                    drawPath(
-                        path = path,
-                        color = Color(0xFF16A34A),
-                        style = Stroke(width = 2.dp.toPx())
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * 4. Overview Card: Pending Rent (Alert red style)
- */
-@Composable
-private fun OverviewPendingRentCard(
-    title: String,
-    value: String,
-    subtitle: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        onClick = onClick,
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEDF2F7)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
-        modifier = modifier.height(130.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(14.dp),
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            // Icon + Title
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFFEF2F2)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Warning,
-                        contentDescription = null,
-                        tint = Color(0xFFDC2626),
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = Color(0xFF64748B),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            // Big Stat
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFFDC2626),
-                    fontSize = 22.sp
-                )
-            )
-
-            // Subtitle + Forward Arrow
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = Color(0xFF64748B),
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                )
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = Color(0xFF94A3B8),
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-        }
-    }
-}
-
-/**
- * 5. Overview Card: Monthly Expenses (Purple style)
- */
-@Composable
-private fun OverviewExpensesCard(
-    title: String,
-    value: String,
-    subtitle: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        onClick = onClick,
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEDF2F7)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
-        modifier = modifier.height(130.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(14.dp),
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            // Icon + Title
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFF6EEFD)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Analytics,
-                        contentDescription = null,
-                        tint = Color(0xFF9333EA),
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = Color(0xFF64748B),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            // Big Stat
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF7C3AED),
-                    fontSize = 22.sp
-                )
-            )
-
-            // Subtitle + Forward Arrow
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = Color(0xFF64748B),
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                )
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = Color(0xFF94A3B8),
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-        }
-    }
-}
-
-/**
- * 6. Recent Activity Row
- */
-@Composable
-private fun RecentActivityRow(
-    activity: RecentActivity,
-    isLast: Boolean,
-    onClick: () -> Unit
-) {
-    val (icon, iconTint, bgColor) = when (activity.type) {
-        ActivityType.TENANT_ADDED -> Triple(Icons.Default.Person, Color(0xFF2563EB), Color(0xFFEBF3FE))
-        ActivityType.RENT_PAID -> Triple(Icons.Default.AttachMoney, Color(0xFF16A34A), Color(0xFFEDF9F0))
-        ActivityType.EXPENSE_ADDED -> Triple(Icons.Default.Receipt, Color(0xFF9333EA), Color(0xFFF6EEFD))
-        ActivityType.ROOM_VACATED -> Triple(Icons.Default.MeetingRoom, Color(0xFF64748B), Color(0xFFF1F5F9))
-    }
-
-    val titleKey = when (activity.type) {
-        ActivityType.TENANT_ADDED -> "Tenant Checked In"
-        ActivityType.RENT_PAID -> if (activity.status == "Partial") "Rent Partially Paid" else "Rent Paid"
-        ActivityType.EXPENSE_ADDED -> "Expense Recorded"
-        ActivityType.ROOM_VACATED -> "Room Vacated"
-    }
-    val translatedTitle = rememberTranslation(titleKey)
-
-    val translatedDescription = when (activity.type) {
-        ActivityType.TENANT_ADDED -> "${activity.param1} ${rememberTranslation("moved into")} ${rememberTranslation("Room")} ${activity.param2} (${rememberTranslation("Bed")} ${activity.param3})"
-        ActivityType.RENT_PAID -> "₹${String.format("%,.0f", activity.amount)} ${rememberTranslation("collected from")} ${activity.param1} (${rememberTranslation("Room")} ${activity.param2})"
-        ActivityType.EXPENSE_ADDED -> "₹${String.format("%,.0f", activity.amount)} ${rememberTranslation("for")} ${activity.param1} - ${activity.param2}"
-        ActivityType.ROOM_VACATED -> "${activity.param1} ${rememberTranslation("vacated")} ${rememberTranslation("Room")} ${activity.param2}"
-    }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Icon Circle
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(bgColor),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = iconTint,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.width(12.dp))
-
-        // Title and Description
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = translatedTitle,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0F172A),
-                    fontSize = 13.5.sp
-                ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = translatedDescription,
-                style = MaterialTheme.typography.bodySmall.copy(
-                    color = Color(0xFF64748B),
-                    fontSize = 12.sp
-                ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-
-        Spacer(modifier = Modifier.width(8.dp))
-
-        // Time / Date + Forward Chevron
-        val parts = activity.date.split(" ")
-        val displayTime = if (parts.size > 1) parts[1] else activity.date.takeLast(5)
-
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Text(
-                text = displayTime,
-                style = MaterialTheme.typography.bodySmall.copy(
-                    color = Color(0xFF64748B),
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            )
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = Color(0xFF94A3B8),
-                modifier = Modifier.size(16.dp)
-            )
-        }
-    }
-
-    if (!isLast) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(Color(0xFFF1F5F9))
-        )
-    }
-}
-
-/**
- * 7. Upcoming Vacancy Row
- */
-@Composable
-private fun UpcomingVacancyRow(
+private fun UpcomingMoveOutRow(
     vacancy: UpcomingVacancyItem,
+    isTe: Boolean,
     isLast: Boolean,
     onClick: () -> Unit
 ) {
     val initial = vacancy.tenantName.trim().firstOrNull()?.toString()?.uppercase() ?: "T"
+    val formattedDate = formatHumanReadableDate(vacancy.leavingDate)
+
+    val badgeText = if (vacancy.daysRemaining <= 0) {
+        if (isTe) "ఈరోజే ఖాళీ చేస్తున్నారు" else "Moving out today"
+    } else {
+        if (isTe) "${vacancy.daysRemaining} రోజుల్లో ఖాళీ" else "Moving out in ${vacancy.daysRemaining}d"
+    }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(vertical = 10.dp)
-            .testTag("upcoming_vacancy_card_${vacancy.tenantId}"),
+            .padding(vertical = 8.dp)
+            .testTag("upcoming_move_out_row_${vacancy.tenantId}"),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Icon Circle (Warm Amber)
+        // Date / Avatar Circle
         Box(
             modifier = Modifier
-                .size(40.dp)
+                .size(36.dp)
                 .clip(CircleShape)
                 .background(Color(0xFFFEF3C7)),
             contentAlignment = Alignment.Center
@@ -1563,62 +1310,69 @@ private fun UpcomingVacancyRow(
                 text = initial,
                 fontWeight = FontWeight.Bold,
                 color = Color(0xFFD97706),
-                fontSize = 16.sp
+                fontSize = 15.sp
             )
         }
 
-        Spacer(modifier = Modifier.width(12.dp))
+        Spacer(modifier = Modifier.width(10.dp))
 
-        // Tenant Name and Room Info
+        // Tenant Name & Room
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = vacancy.tenantName,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0F172A),
-                    fontSize = 14.sp
-                ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = "Room ${vacancy.roomNumber} • ${vacancy.bedId}",
-                style = MaterialTheme.typography.bodySmall.copy(
-                    color = Color(0xFF64748B),
-                    fontSize = 12.sp
-                ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-
-        Spacer(modifier = Modifier.width(8.dp))
-
-        // Vacating Date Badge
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color(0xFFFEF3C7))
-                    .padding(horizontal = 7.dp, vertical = 3.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
-                    text = "Vacating: ${vacancy.leavingDate}",
-                    color = Color(0xFFB45309),
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.Bold
+                    text = vacancy.tenantName,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 13.5.sp
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "· $formattedDate",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = MaterialTheme.colorScheme.outline,
+                        fontSize = 11.5.sp
+                    )
                 )
             }
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = Color(0xFF94A3B8),
-                modifier = Modifier.size(16.dp)
+            Text(
+                text = if (vacancy.bedId.isNotBlank()) "Room ${vacancy.roomNumber} · ${vacancy.bedId}" else "Room ${vacancy.roomNumber}",
+                style = MaterialTheme.typography.bodySmall.copy(
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 11.5.sp
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
+
+        Spacer(modifier = Modifier.width(6.dp))
+
+        // Move-out Status Badge
+        Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = if (vacancy.daysRemaining <= 0) Color(0xFFFEE2E2) else Color(0xFFFEF3C7)
+        ) {
+            Text(
+                text = badgeText,
+                color = if (vacancy.daysRemaining <= 0) Color(0xFFDC2626) else Color(0xFFB45309),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+            )
+        }
+
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(16.dp)
+        )
     }
 
     if (!isLast) {
@@ -1626,189 +1380,150 @@ private fun UpcomingVacancyRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(1.dp)
-                .background(Color(0xFFF1F5F9))
+                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
         )
     }
 }
 
 /**
- * Section 24: What Needs Attention Card
+ * Meaningful Activity Row
  */
 @Composable
-fun WhatNeedsAttentionCard(
-    attentionItems: List<com.example.features.reports.domain.model.AttentionItem>,
-    selectedLanguage: String,
-    onNavigate: (String) -> Unit
+private fun MeaningfulActivityRow(
+    activity: RecentActivity,
+    isTe: Boolean,
+    isLast: Boolean,
+    onClick: () -> Unit
 ) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFDE68A)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+    val (icon, iconTint, bgColor) = when (activity.type) {
+        ActivityType.TENANT_ADDED -> Triple(Icons.Default.Person, Color(0xFF2563EB), Color(0xFFEBF3FE))
+        ActivityType.RENT_PAID -> Triple(Icons.Default.CurrencyRupee, Color(0xFF16A34A), Color(0xFFEDF9F0))
+        ActivityType.EXPENSE_ADDED -> Triple(Icons.Default.ReceiptLong, Color(0xFF9333EA), Color(0xFFF6EEFD))
+        ActivityType.ROOM_VACATED -> Triple(Icons.Default.MeetingRoom, Color(0xFF64748B), Color(0xFFF1F5F9))
+    }
+
+    val formattedDate = formatHumanReadableDate(activity.date)
+
+    val (primaryTitle, subtitleText) = when (activity.type) {
+        ActivityType.TENANT_ADDED -> {
+            val title = activity.param1.ifBlank { "New Tenant" }
+            val sub = if (activity.param2.isNotBlank()) {
+                if (isTe) "గది ${activity.param2} · అద్దెదారు చేరారు · $formattedDate" else "Room ${activity.param2} · Tenant added · $formattedDate"
+            } else {
+                if (isTe) "అద్దెదారు చేరారు · $formattedDate" else "Tenant added · $formattedDate"
+            }
+            Pair(title, sub)
+        }
+        ActivityType.RENT_PAID -> {
+            val title = activity.param1.ifBlank { "Tenant" }
+            val sub = if (isTe) {
+                "₹${String.format(Locale.US, "%,.0f", activity.amount)} · అద్దె వసూలు · $formattedDate"
+            } else {
+                "₹${String.format(Locale.US, "%,.0f", activity.amount)} · Rent received · $formattedDate"
+            }
+            Pair(title, sub)
+        }
+        ActivityType.EXPENSE_ADDED -> {
+            val title = activity.param1.ifBlank { if (isTe) "ఖర్చు" else "Expense" }
+            val sub = if (isTe) {
+                "₹${String.format(Locale.US, "%,.0f", activity.amount)} · ఖర్చు · $formattedDate"
+            } else {
+                "₹${String.format(Locale.US, "%,.0f", activity.amount)} · Expense · $formattedDate"
+            }
+            Pair(title, sub)
+        }
+        ActivityType.ROOM_VACATED -> {
+            val title = activity.param1.ifBlank { "Tenant" }
+            val sub = if (isTe) {
+                "గది ${activity.param2} · గది ఖాళీ చేశారు · $formattedDate"
+            } else {
+                "Room ${activity.param2} · Room vacated · $formattedDate"
+            }
+            Pair(title, sub)
+        }
+    }
+
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .testTag("dashboard_what_needs_attention_card")
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(
-            modifier = Modifier.padding(14.dp)
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(bgColor),
+            contentAlignment = Alignment.Center
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Warning,
-                    contentDescription = null,
-                    tint = Color(0xFFD97706),
-                    modifier = Modifier.size(20.dp)
-                )
-                Text(
-                    text = if (selectedLanguage == "తెలుగు") "దృష్టి సారించాల్సినవి" else "What Needs Attention",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF92400E),
-                        fontSize = 16.sp
-                    )
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFFFEF3C7))
-                        .padding(horizontal = 7.dp, vertical = 2.dp)
-                ) {
-                    Text(
-                        text = "${attentionItems.size}",
-                        color = Color(0xFFB45309),
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                attentionItems.take(4).forEach { item ->
-                    val bgTint = when (item.severity) {
-                        "ALERT" -> Color(0xFFFEF2F2)
-                        "INFO" -> Color(0xFFEFF6FF)
-                        else -> Color(0xFFFFFBEB)
-                    }
-                    val borderTint = when (item.severity) {
-                        "ALERT" -> Color(0xFFFECACA)
-                        "INFO" -> Color(0xFFBFDBFE)
-                        else -> Color(0xFFFDE68A)
-                    }
-                    val textTint = when (item.severity) {
-                        "ALERT" -> Color(0xFF991B1B)
-                        "INFO" -> Color(0xFF1E40AF)
-                        else -> Color(0xFF92400E)
-                    }
-
-                    androidx.compose.material3.Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = bgTint,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, borderTint),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable(enabled = item.actionRoute != null) {
-                                item.actionRoute?.let { onNavigate(it) }
-                            }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = item.title,
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        color = textTint,
-                                        fontSize = 13.sp
-                                    )
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = item.subtitle,
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        color = Color(0xFF475569),
-                                        fontSize = 12.sp
-                                    )
-                                )
-                            }
-                            if (item.actionRoute != null) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                    contentDescription = null,
-                                    tint = textTint,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = iconTint,
+                modifier = Modifier.size(18.dp)
+            )
         }
+
+        Spacer(modifier = Modifier.width(10.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = primaryTitle,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 13.5.sp
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = subtitleText,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 11.5.sp
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(16.dp)
+        )
+    }
+
+    if (!isLast) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+        )
     }
 }
 
 /**
- * Modern Bottom Navigation Bar: Home | Rooms | Tenants | Payments | More
+ * Format raw date string ("2026-10-01" or "2026-10-01 10:30") into human readable "Oct 1, 2026" or "Oct 1"
  */
-@Composable
-fun DashboardBottomBar(
-    currentRoute: String,
-    onNavigate: (String) -> Unit,
-    selectedLanguage: String = "EN"
-) {
-    com.example.core.designsystem.AppBottomNavBar(
-        currentTab = com.example.core.designsystem.MainTab.HOME,
-        onNavigate = onNavigate
-    )
-}
-
-@Composable
-private fun BottomNavItem(
-    label: String,
-    icon: ImageVector,
-    isSelected: Boolean,
-    onClick: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (isSelected) Color(0xFFEBF3FE) else Color.Transparent)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick
-            )
-            .padding(horizontal = 14.dp, vertical = 6.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = if (isSelected) Color(0xFF2563EB) else Color(0xFF64748B),
-                modifier = Modifier.size(22.dp)
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                    fontSize = 11.sp,
-                    color = if (isSelected) Color(0xFF2563EB) else Color(0xFF64748B)
-                )
-            )
+private fun formatHumanReadableDate(rawDate: String): String {
+    if (rawDate.isBlank()) return ""
+    return try {
+        val cleanDate = rawDate.split(" ").first()
+        val parser = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        val date = parser.parse(cleanDate)
+        if (date != null) {
+            val formatter = SimpleDateFormat("MMM d", Locale.US)
+            formatter.format(date)
+        } else {
+            cleanDate
         }
+    } catch (_: Exception) {
+        rawDate.take(10)
     }
 }
 
@@ -1821,7 +1536,7 @@ fun DashboardSkeletonLoading() {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        CircularProgressIndicator(color = Color(0xFF2563EB))
+        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
     }
 }
 
@@ -1837,8 +1552,8 @@ fun DashboardEmptyRoomsState(onAddRoomClick: () -> Unit) {
         Icon(
             imageVector = Icons.Default.AddHome,
             contentDescription = null,
-            tint = Color(0xFF2563EB),
-            modifier = Modifier.size(72.dp)
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(64.dp)
         )
         Spacer(modifier = Modifier.height(16.dp))
         Text(
@@ -1851,13 +1566,13 @@ fun DashboardEmptyRoomsState(onAddRoomClick: () -> Unit) {
         Text(
             text = "Add your first room to start managing your PG effortlessly.",
             style = MaterialTheme.typography.bodyMedium,
-            color = Color(0xFF64748B),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
         )
         Spacer(modifier = Modifier.height(24.dp))
         Button(
             onClick = onAddRoomClick,
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier.fillMaxWidth().height(48.dp)
         ) {
@@ -1879,7 +1594,7 @@ fun DashboardErrorState(errorMessage: String, onRetryClick: () -> Unit) {
             imageVector = Icons.Default.ErrorOutline,
             contentDescription = null,
             tint = Color(0xFFDC2626),
-            modifier = Modifier.size(72.dp)
+            modifier = Modifier.size(64.dp)
         )
         Spacer(modifier = Modifier.height(16.dp))
         Text(
@@ -1892,17 +1607,17 @@ fun DashboardErrorState(errorMessage: String, onRetryClick: () -> Unit) {
         Text(
             text = errorMessage,
             style = MaterialTheme.typography.bodyMedium,
-            color = Color(0xFF64748B),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
         )
         Spacer(modifier = Modifier.height(24.dp))
         Button(
             onClick = onRetryClick,
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier.fillMaxWidth().height(48.dp)
         ) {
-            Text("Retry Sync")
+            Text("Retry")
         }
     }
 }

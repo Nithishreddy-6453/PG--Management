@@ -191,24 +191,41 @@ fun AddRoomScreen(
 
             Spacer(modifier = Modifier.height(spacing.medium))
 
-            // 7. Save Button
-            Button(
-                onClick = { viewModel.saveRoom() },
-                enabled = !state.isSaving,
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-                    .testTag("save_room_button")
+            // 7. Actions: Cancel and Save
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                if (state.isSaving) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(80.dp),
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        strokeWidth = 2.dp
-                    )
-                } else {
-                    Text("Register Room", fontWeight = FontWeight.Bold)
+                OutlinedButton(
+                    onClick = onBackClick,
+                    enabled = !state.isSaving,
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp)
+                        .testTag("cancel_room_button")
+                ) {
+                    Text("Cancel", fontWeight = FontWeight.SemiBold)
+                }
+
+                Button(
+                    onClick = { viewModel.saveRoom() },
+                    enabled = !state.isSaving,
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .weight(1.5f)
+                        .height(52.dp)
+                        .testTag("save_room_button")
+                ) {
+                    if (state.isSaving) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Text("Register Room", fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }

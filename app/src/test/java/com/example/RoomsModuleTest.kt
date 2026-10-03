@@ -241,26 +241,29 @@ class RoomsModuleTest {
         )
         
         // Active collection to start the cold StateFlow
-        val job = launch { vm.uiState.collect {} }
-        advanceUntilIdle()
-
-        // Wait for the state flow to emit Empty after Loading
-        advanceUntilIdle()
-        var state = vm.uiState.value
-        assertTrue(state is RoomListUiState.Empty)
+        val nonLoadingState = kotlinx.coroutines.flow.flow {
+            vm.uiState.collect { state ->
+                if (state !is RoomListUiState.Loading) {
+                    emit(state)
+                }
+            }
+        }.first()
+        assertTrue(nonLoadingState is RoomListUiState.Empty)
 
         // Insert room
         repository.insertRoom(RoomEntity("101", "1st Floor", 2, 6000.0))
         advanceUntilIdle()
 
         // Get updated state
-        state = vm.uiState.value
-        assertTrue(state is RoomListUiState.Success)
-        val successState = state as RoomListUiState.Success
+        val successState = kotlinx.coroutines.flow.flow {
+            vm.uiState.collect { state ->
+                if (state is RoomListUiState.Success) {
+                    emit(state)
+                }
+            }
+        }.first() as RoomListUiState.Success
         assertEquals(1, successState.rooms.size)
-        assertEquals("101", successState.rooms[0].roomNumber)
-        
-        job.cancel()
+        assertEquals("101", successState.rooms[0].room.roomNumber)
     }
 
     @Test

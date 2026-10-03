@@ -7,6 +7,7 @@ import com.example.core.device.DeviceIdentityManager
 import com.example.data.database.ConflictRecordEntity
 import com.example.data.database.SyncOperationEntity
 import com.example.data.database.SyncQueueDao
+import com.example.features.properties.data.CurrentPropertyManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -26,7 +27,8 @@ class SyncCoordinator @Inject constructor(
     private val syncEngine: SyncEngine,
     private val realtimeSyncManager: RealtimeSyncManager,
     private val deviceIdentityManager: DeviceIdentityManager,
-    private val logger: PgLogger
+    private val logger: PgLogger,
+    private val currentPropertyManager: CurrentPropertyManager? = null
 ) {
     val syncDiagnosticsFlow: Flow<SyncDiagnostics> = combine(
         syncQueueDao.getPendingCountFlow(),
@@ -123,11 +125,13 @@ class SyncCoordinator @Inject constructor(
                 val bootstrapResult = syncEngine.performInitialCloudBootstrap(newOwnerId)
                 if (bootstrapResult is PgResult.Success) {
                     logger.i(TAG, "Initial bootstrap complete. Enabling real-time and periodic sync.")
+                    currentPropertyManager?.restoreActiveProperty()
                     realtimeSyncManager.startListening(newOwnerId)
                     initializePeriodicSync()
                     return SignInResult.ExistingAccountBootstrapped
                 } else {
                     logger.e(TAG, "Initial bootstrap encountered error: ${(bootstrapResult as PgResult.Failure).error.message}")
+                    currentPropertyManager?.restoreActiveProperty()
                     realtimeSyncManager.startListening(newOwnerId)
                     initializePeriodicSync()
                     return SignInResult.ExistingAccountBootstrapped
@@ -136,10 +140,12 @@ class SyncCoordinator @Inject constructor(
                 logger.i(TAG, "No existing cloud data found for UID: $newOwnerId. Treating as new account.")
                 deviceIdentityManager.setDeviceBootstrapCompleted(newOwnerId, true)
                 syncEngine.clearLocalUserData()
+                currentPropertyManager?.restoreActiveProperty()
                 return SignInResult.NewAccount
             }
         } else {
             logger.i(TAG, "Device already bootstrapped for UID: $newOwnerId. Resuming normal sync.")
+            currentPropertyManager?.restoreActiveProperty()
             realtimeSyncManager.startListening(newOwnerId)
             initializePeriodicSync()
             triggerImmediateSync()

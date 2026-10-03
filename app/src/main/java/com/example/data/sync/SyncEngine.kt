@@ -231,11 +231,23 @@ class SyncEngine @Inject constructor(
                     val tenants = tenantRes.data
                     logger.i(TAG, "Bootstrap: Restoring ${tenants.size} tenants from cloud")
                     for (dto in tenants) {
+                        val propId = if (dto.propertyId.isNotBlank() && dto.propertyId != "property_default") {
+                            dto.propertyId
+                        } else {
+                            val matchingRoom = if (dto.roomNumber.isNotBlank()) roomDao.getRoom(dto.roomNumber) else null
+                            val resolved = matchingRoom?.propertyId ?: ""
+                            if (resolved.isBlank() || resolved == "property_default") {
+                                logger.w(TAG, "Bootstrap: Skipping tenant ${dto.cloudId.take(8)} missing valid propertyId to preserve property isolation")
+                                continue
+                            }
+                            resolved
+                        }
                         tenantDao.insertTenant(
                             dto.toEntity().copy(
                                 id = 0,
                                 cloudId = dto.cloudId.ifBlank { dto.id },
                                 ownerId = ownerId,
+                                propertyId = propId,
                                 syncStatus = "SYNCED",
                                 version = dto.version,
                                 updatedAt = dto.updatedAt,
@@ -1120,11 +1132,18 @@ class SyncEngine @Inject constructor(
                     else if (remoteDto.localId > 0) tenantDao.getTenantByIdIncludingDeleted(remoteDto.localId)
                     else null
                 if (local == null) {
+                    val propId = if (remoteDto.propertyId.isNotBlank() && remoteDto.propertyId != "property_default") {
+                        remoteDto.propertyId
+                    } else {
+                        logger.w(TAG, "Sync: Dropping tenant ${cloudId.take(8)} missing valid propertyId to preserve isolation")
+                        continue
+                    }
                     tenantDao.insertTenant(
                         remoteDto.toEntity().copy(
                             id = 0,
                             cloudId = cloudId,
                             ownerId = ownerId,
+                            propertyId = propId,
                             syncStatus = "SYNCED",
                             version = remoteDto.version,
                             updatedAt = remoteDto.updatedAt,
@@ -1162,11 +1181,17 @@ class SyncEngine @Inject constructor(
 
                 when (decision) {
                     is ConflictResult.UseRemote -> {
+                        val targetPropId = if (remoteDto.propertyId.isNotBlank() && remoteDto.propertyId != "property_default") {
+                            remoteDto.propertyId
+                        } else {
+                            local.propertyId
+                        }
                         tenantDao.updateTenant(
                             remoteDto.toEntity().copy(
                                 id = local.id,
                                 cloudId = local.cloudId.ifBlank { cloudId },
                                 ownerId = ownerId,
+                                propertyId = targetPropId,
                                 syncStatus = "SYNCED",
                                 version = remoteDto.version,
                                 updatedAt = remoteDto.updatedAt,

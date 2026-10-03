@@ -851,54 +851,32 @@ fun TenantDetailsScreen(
             }
 
             // Vacate Dialog Confirmation
-            if (showVacateDialog) {
-                AlertDialog(
-                    onDismissRequest = { showVacateDialog = false },
-                    title = { Text("Vacate Tenant?", fontWeight = FontWeight.Bold) },
-                    text = { Text("This will release the bed assignment and set the occupancy status of the tenant to Vacated. The historical rent logs and tenant personal history will be preserved.") },
-                    confirmButton = {
-                        TextButton(
-                            onClick = {
-                                viewModel.vacateTenant()
-                                showVacateDialog = false
-                            },
-                            modifier = Modifier.testTag("confirm_vacate_button")
-                        ) {
-                            Text("Confirm Vacate", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showVacateDialog = false }) {
-                            Text("Cancel")
-                        }
-                    }
-                )
-            }
+            com.example.core.designsystem.PgConfirmDialog(
+                isOpen = showVacateDialog,
+                title = "Vacate Tenant?",
+                message = "This will release the bed assignment and set the occupancy status of the tenant to Vacated. The historical rent logs and tenant personal history will be preserved.",
+                confirmText = "Confirm Vacate",
+                isDestructive = true,
+                onConfirm = {
+                    viewModel.vacateTenant()
+                    showVacateDialog = false
+                },
+                onDismiss = { showVacateDialog = false }
+            )
 
             // Delete Dialog Confirmation
-            if (showDeleteDialog) {
-                AlertDialog(
-                    onDismissRequest = { showDeleteDialog = false },
-                    title = { Text("Delete Tenant Permanently?", fontWeight = FontWeight.Bold) },
-                    text = { Text("Are you sure you want to delete this tenant permanently? This action will completely erase the resident profile and all past payment history logs from the system and cannot be undone.") },
-                    confirmButton = {
-                        TextButton(
-                            onClick = {
-                                viewModel.deleteTenant()
-                                showDeleteDialog = false
-                            },
-                            modifier = Modifier.testTag("confirm_delete_button")
-                        ) {
-                            Text("Delete Permanently", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showDeleteDialog = false }) {
-                            Text("Cancel")
-                        }
-                    }
-                )
-            }
+            com.example.core.designsystem.PgConfirmDialog(
+                isOpen = showDeleteDialog,
+                title = "Delete Tenant Permanently?",
+                message = "Are you sure you want to delete this tenant permanently? This action will completely erase the resident profile and all past payment history logs from the system and cannot be undone.",
+                confirmText = "Delete Permanently",
+                isDestructive = true,
+                onConfirm = {
+                    viewModel.deleteTenant()
+                    showDeleteDialog = false
+                },
+                onDismiss = { showDeleteDialog = false }
+            )
         }
     }
 }

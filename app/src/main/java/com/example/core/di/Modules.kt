@@ -173,15 +173,18 @@ object RepositoryModule {
         roomDao: RoomDao,
         tenantDao: TenantDao,
         rentPaymentDao: RentPaymentDao,
+        bedDao: com.example.data.database.BedDao,
+        bedAssignmentDao: com.example.data.database.BedAssignmentDao,
         currentPropertyManager: CurrentPropertyManager,
         syncCoordinator: SyncCoordinator
     ): com.example.features.tenants.domain.repository.TenantRepository {
-        return com.example.features.tenants.data.repository.TenantRepositoryImpl(roomDao, tenantDao, rentPaymentDao, currentPropertyManager, syncCoordinator)
+        return com.example.features.tenants.data.repository.TenantRepositoryImpl(roomDao, tenantDao, rentPaymentDao, bedDao, bedAssignmentDao, currentPropertyManager, syncCoordinator)
     }
 
     @Provides
     @Singleton
     fun provideRoomRepository(
+        database: AppDatabase,
         roomDao: RoomDao,
         tenantDao: TenantDao,
         rentPaymentDao: RentPaymentDao,
@@ -190,7 +193,7 @@ object RepositoryModule {
         currentPropertyManager: CurrentPropertyManager,
         syncCoordinator: SyncCoordinator
     ): com.example.features.rooms.domain.repository.RoomRepository {
-        return com.example.features.rooms.data.repository.RoomRepositoryImpl(roomDao, tenantDao, rentPaymentDao, bedDao, bedAssignmentDao, currentPropertyManager, syncCoordinator)
+        return com.example.features.rooms.data.repository.RoomRepositoryImpl(roomDao, tenantDao, rentPaymentDao, bedDao, bedAssignmentDao, currentPropertyManager, syncCoordinator, database)
     }
 
     @Provides

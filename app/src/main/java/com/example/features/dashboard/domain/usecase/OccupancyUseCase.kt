@@ -1,10 +1,14 @@
 package com.example.features.dashboard.domain.usecase
 
+import androidx.compose.runtime.Immutable
 import com.example.features.dashboard.data.DashboardRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import javax.inject.Inject
 
+@Immutable
 data class OccupancyStats(
     val totalRooms: Int = 0,
     val occupiedRooms: Int = 0,
@@ -76,6 +80,6 @@ class OccupancyUseCase @Inject constructor(
                 tenantsCapacityRatioText = "$activeTenantsCount / $totalPgCapacity Tenants",
                 capacityDisplayText = "$activeTenantsCount Tenants / $totalPgCapacity Capacity"
             )
-        }
+        }.flowOn(Dispatchers.Default)
     }
 }

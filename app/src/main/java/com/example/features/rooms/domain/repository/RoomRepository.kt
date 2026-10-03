@@ -27,6 +27,6 @@ interface RoomRepository {
     suspend fun deleteRoom(roomNumber: String)
     suspend fun assignTenantToBed(roomNumber: String, bedId: String, tenantId: Int, startDate: String, agreedRent: Double): RoomValidationResult
     suspend fun transferTenant(tenantId: Int, newRoomNumber: String, newBedId: String, transferDate: String, newAgreedRent: Double): RoomValidationResult
-    suspend fun vacateTenant(tenantId: Int, leavingDate: String): RoomValidationResult
+    suspend fun vacateTenant(tenantId: Int, leavingDate: String, currentDateOverride: String? = null): RoomValidationResult
     suspend fun blockBed(roomNumber: String, bedId: String, blocked: Boolean): RoomValidationResult
 }

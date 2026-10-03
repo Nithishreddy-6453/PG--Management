@@ -35,6 +35,7 @@ class FirestoreTenantRepository @Inject constructor(
                 id = docId,
                 cloudId = docId,
                 ownerId = if (tenantDto.ownerId.isNotBlank()) tenantDto.ownerId else currentOwnerId,
+                propertyId = tenantDto.propertyId,
                 updatedAt = System.currentTimeMillis()
             )
             collection.document(docId).set(dtoToSave).await()

@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -85,7 +86,7 @@ class PgViewModel @Inject constructor(
             totalExpenses = totalExpenses,
             netProfit = netProfit
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DashboardStats())
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DashboardStats())
 
     // Unlock App with PIN
     fun unlock(pin: String): Boolean {

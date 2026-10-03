@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.features.dashboard.domain.usecase.DashboardSummary
 import com.example.features.dashboard.domain.usecase.DashboardSummaryUseCase
+import com.example.features.properties.data.CurrentPropertyManager
 import com.example.features.rent.domain.util.CurrentBillingMonthManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -13,9 +14,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 sealed interface DashboardUiState {
@@ -38,7 +41,8 @@ sealed interface DashboardUiEffect {
 @HiltViewModel
 class DashboardViewModel @Inject constructor(
     private val dashboardSummaryUseCase: DashboardSummaryUseCase,
-    private val currentBillingMonthManager: CurrentBillingMonthManager
+    private val currentBillingMonthManager: CurrentBillingMonthManager,
+    private val currentPropertyManager: CurrentPropertyManager? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<DashboardUiState>(DashboardUiState.Loading)
@@ -66,20 +70,21 @@ class DashboardViewModel @Inject constructor(
     }
 
     private fun loadDashboardSummary() {
-        dashboardSummaryUseCase()
-            .onStart {
-                _uiState.value = DashboardUiState.Loading
-            }
-            .onEach { summary ->
-                if (summary.occupancy.totalRooms == 0) {
-                    _uiState.value = DashboardUiState.Empty
-                } else {
-                    _uiState.value = DashboardUiState.Success(summary)
+        viewModelScope.launch {
+            _uiState.value = DashboardUiState.Loading
+            currentPropertyManager?.restoreActiveProperty()
+            dashboardSummaryUseCase()
+                .onEach { summary ->
+                    if (summary.occupancy.totalRooms == 0 && summary.occupancy.totalBeds == 0 && summary.occupancy.activeTenantsCount == 0) {
+                        _uiState.value = DashboardUiState.Empty
+                    } else {
+                        _uiState.value = DashboardUiState.Success(summary)
+                    }
                 }
-            }
-            .catch { error ->
-                _uiState.value = DashboardUiState.Error(error.localizedMessage ?: "Unknown error occurred")
-            }
-            .launchIn(viewModelScope)
+                .catch { error ->
+                    _uiState.value = DashboardUiState.Error(error.localizedMessage ?: "Unknown error occurred")
+                }
+                .collect()
+        }
     }
 }
