@@ -57,6 +57,11 @@ fun AddRoomScreen(
                         )
                     }
                 },
+                actions = {
+                    com.example.core.language.GlobalLanguageToggle(
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
                     titleContentColor = MaterialTheme.colorScheme.onBackground,

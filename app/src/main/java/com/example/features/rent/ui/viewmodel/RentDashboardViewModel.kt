@@ -2,9 +2,12 @@ package com.example.features.rent.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.features.rent.domain.model.MonthGenerationPreview
 import com.example.features.rent.domain.repository.RentSummary
-import com.example.features.rent.domain.usecase.GenerateMonthlyInvoicesUseCase
+import com.example.features.rent.domain.usecase.GenerateMonthRentUseCase
+import com.example.features.rent.domain.usecase.GetMonthPreviewUseCase
 import com.example.features.rent.domain.usecase.GetRentSummaryUseCase
+import com.example.features.rent.domain.util.RentBillingEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -13,6 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.util.Date
 import javax.inject.Inject
 
 sealed class RentDashboardUiState {
@@ -24,7 +28,8 @@ sealed class RentDashboardUiState {
 @HiltViewModel
 class RentDashboardViewModel @Inject constructor(
     private val getRentSummaryUseCase: GetRentSummaryUseCase,
-    private val generateMonthlyInvoicesUseCase: GenerateMonthlyInvoicesUseCase
+    private val getMonthPreviewUseCase: GetMonthPreviewUseCase,
+    private val generateMonthRentUseCase: GenerateMonthRentUseCase
 ) : ViewModel() {
 
     val uiState: StateFlow<RentDashboardUiState> = getRentSummaryUseCase()
@@ -38,19 +43,40 @@ class RentDashboardViewModel @Inject constructor(
     private val _invoiceGenerationState = MutableStateFlow<String?>(null)
     val invoiceGenerationState = _invoiceGenerationState.asStateFlow()
 
-    fun generateInvoices() {
+    private val _previewData = MutableStateFlow<MonthGenerationPreview?>(null)
+    val previewData = _previewData.asStateFlow()
+
+    fun requestMonthPreview(targetMonth: String? = null) {
+        val monthToPreview = targetMonth ?: RentBillingEngine.formatCanonicalBillingMonth(Date())
+        viewModelScope.launch {
+            try {
+                val preview = getMonthPreviewUseCase(monthToPreview)
+                _previewData.value = preview
+            } catch (e: Exception) {
+                _invoiceGenerationState.value = "Error preparing preview: ${e.message}"
+            }
+        }
+    }
+
+    fun dismissPreview() {
+        _previewData.value = null
+    }
+
+    fun confirmAndGenerateMonth(targetMonth: String, dueDate: String = "", backupPreviousMonth: Boolean = true) {
         viewModelScope.launch {
             try {
                 _invoiceGenerationState.value = "Generating..."
-                val currentTime = System.currentTimeMillis()
-                val dueDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(currentTime + 5L * 24 * 60 * 60 * 1000))
-                val billingMonthStr = java.text.SimpleDateFormat("MMMM yyyy", java.util.Locale.US).format(java.util.Date(currentTime))
-                generateMonthlyInvoicesUseCase(dueDateStr, billingMonthStr)
-                _invoiceGenerationState.value = "Success"
+                val result = generateMonthRentUseCase(targetMonth, dueDate, backupPreviousMonth)
+                _previewData.value = null
+                _invoiceGenerationState.value = "${result.billingMonth} rent generated successfully."
             } catch (e: Exception) {
                 _invoiceGenerationState.value = "Error: ${e.message}"
             }
         }
+    }
+
+    fun generateInvoices() {
+        requestMonthPreview()
     }
     
     fun clearInvoiceGenerationState() {

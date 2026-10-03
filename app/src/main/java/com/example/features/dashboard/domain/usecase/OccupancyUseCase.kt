@@ -13,34 +13,68 @@ data class OccupancyStats(
     val totalBeds: Int = 0,
     val occupiedBeds: Int = 0,
     val vacantBeds: Int = 0,
-    val bedOccupancyPercentage: Double = 0.0
+    val bedOccupancyPercentage: Double = 0.0,
+    val activeTenantsCount: Int = 0,
+    val totalPgCapacity: Int = 0,
+    val homeOccupancyPercentage: Double = 0.0,
+    val vacanciesCount: Int = 0,
+    val tenantsCapacityRatioText: String = "0 / 0 Tenants",
+    val capacityDisplayText: String = "0 Tenants / 0 Capacity"
 )
 
 class OccupancyUseCase @Inject constructor(
     private val repository: DashboardRepository
 ) {
     operator fun invoke(): Flow<OccupancyStats> {
-        return combine(repository.getRoomsFlow(), repository.getTenantsFlow()) { rooms, tenants ->
+        return combine(
+            repository.getRoomsFlow(),
+            repository.getBedsFlow(),
+            repository.getTenantsFlow()
+        ) { rooms, beds, tenants ->
+            val activeRooms = rooms.filter { !it.deleted }
             val activeTenants = tenants.filter { !it.deleted && it.roomNumber.isNotBlank() }
-            val totalRooms = rooms.size
-            val occupiedRooms = rooms.count { room -> activeTenants.any { it.roomNumber == room.roomNumber } }
-            val vacantRooms = totalRooms - occupiedRooms
-            val occupancyPercent = if (totalRooms > 0) (occupiedRooms.toDouble() / totalRooms.toDouble()) * 100.0 else 0.0
-            
-            val totalBeds = rooms.sumOf { it.capacity }
-            val occupiedBeds = activeTenants.size
-            val vacantBeds = (totalBeds - occupiedBeds).coerceAtLeast(0)
-            val bedOccupancyPercent = if (totalBeds > 0) (occupiedBeds.toDouble() / totalBeds.toDouble()) * 100.0 else 0.0
-            
+            val activeTenantsCount = activeTenants.size
+
+            // PG Capacity means total usable beds that can accommodate tenants
+            val totalPgCapacity = activeRooms.sumOf { room ->
+                val rBeds = beds.filter { it.roomNumber == room.roomNumber }
+                if (rBeds.isNotEmpty()) {
+                    rBeds.count { it.status != "BLOCKED" }
+                } else {
+                    room.capacity
+                }
+            }
+
+            val vacanciesCount = (totalPgCapacity - activeTenantsCount).coerceAtLeast(0)
+            val homeOccupancyPercentage = if (totalPgCapacity > 0) {
+                (activeTenantsCount.toDouble() / totalPgCapacity.toDouble()) * 100.0
+            } else 0.0
+
+            val totalRooms = activeRooms.size
+            val occupiedRooms = activeRooms.count { room -> activeTenants.any { it.roomNumber == room.roomNumber } }
+            val vacantRooms = (totalRooms - occupiedRooms).coerceAtLeast(0)
+            val roomOccupancyPercent = if (totalRooms > 0) (occupiedRooms.toDouble() / totalRooms.toDouble()) * 100.0 else 0.0
+
+            val totalBeds = totalPgCapacity
+            val occupiedBeds = activeTenantsCount.coerceAtMost(totalBeds)
+            val vacantBeds = vacanciesCount
+            val bedOccupancyPercent = homeOccupancyPercentage
+
             OccupancyStats(
                 totalRooms = totalRooms,
                 occupiedRooms = occupiedRooms,
                 vacantRooms = vacantRooms,
-                occupancyPercentage = occupancyPercent,
+                occupancyPercentage = roomOccupancyPercent,
                 totalBeds = totalBeds,
                 occupiedBeds = occupiedBeds,
                 vacantBeds = vacantBeds,
-                bedOccupancyPercentage = bedOccupancyPercent
+                bedOccupancyPercentage = bedOccupancyPercent,
+                activeTenantsCount = activeTenantsCount,
+                totalPgCapacity = totalPgCapacity,
+                homeOccupancyPercentage = homeOccupancyPercentage,
+                vacanciesCount = vacanciesCount,
+                tenantsCapacityRatioText = "$activeTenantsCount / $totalPgCapacity Tenants",
+                capacityDisplayText = "$activeTenantsCount Tenants / $totalPgCapacity Capacity"
             )
         }
     }

@@ -174,7 +174,15 @@ class FilterRoomsUseCase @Inject constructor() {
             result = result.filter { it.roomType == roomType }
         }
         if (occupancyStatus != null && occupancyStatus != "All" && occupancyStatus.isNotBlank()) {
-            result = result.filter { it.occupancyStatus.equals(occupancyStatus, ignoreCase = true) }
+            result = result.filter { room ->
+                when (occupancyStatus.lowercase().trim()) {
+                    "available" -> room.availableBeds > 0
+                    "full" -> room.availableBeds == 0 && room.totalBeds > 0
+                    "partially occupied", "partial" -> room.occupiedBeds > 0 && room.availableBeds > 0
+                    "vacant", "empty" -> room.occupiedBeds == 0
+                    else -> room.occupancyStatus.equals(occupancyStatus, ignoreCase = true)
+                }
+            }
         }
         return result
     }

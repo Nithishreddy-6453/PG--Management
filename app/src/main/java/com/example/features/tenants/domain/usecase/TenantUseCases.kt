@@ -3,6 +3,7 @@ package com.example.features.tenants.domain.usecase
 import com.example.data.database.RoomEntity
 import com.example.data.database.TenantEntity
 import com.example.data.database.RentPaymentEntity
+import com.example.features.rent.domain.util.RentBillingEngine
 import com.example.features.tenants.domain.repository.TenantRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -89,6 +90,7 @@ class AddTenantUseCase @Inject constructor(
         address: String = "",
         occupation: String = "",
         companyOrCollege: String = "",
+        leavingDate: String = "",
         notes: String = ""
     ): TenantValidationResult {
         val trimmedRoom = roomNumber.trim()
@@ -161,29 +163,49 @@ class AddTenantUseCase @Inject constructor(
             occupation = occupation.trim(),
             companyOrCollege = companyOrCollege.trim(),
             advancePaid = advancePaid,
+            leavingDate = leavingDate.trim(),
             notes = notes.trim(),
             propertyId = propId
         )
         val newId = repository.insertTenant(tenant)
 
-        // Auto-create initial rent payment
+        // Auto-create initial rent payment using RentBillingEngine for accurate calendar proration
         try {
-            val currentDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-            val currentMonth = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date())
-            repository.insertRentPayment(
-                RentPaymentEntity(
-                    tenantId = newId.toInt(),
-                    tenantName = trimmedName,
-                    roomNumber = trimmedRoom,
-                    billingMonth = currentMonth,
-                    amount = monthlyRent,
-                    dueDate = currentDate,
-                    paymentDate = null,
-                    paymentMode = null,
-                    status = "Pending",
-                    propertyId = propId
-                )
+            val billingMonth = RentBillingEngine.formatCanonicalBillingMonth(Date())
+            val proration = RentBillingEngine.calculateProrationDetails(
+                moveInDateStr = moveInDate,
+                leavingDateStr = leavingDate,
+                billingMonthStr = billingMonth
             )
+            if (proration.applicableDays > 0) {
+                val expectedRent = RentBillingEngine.calculateExpectedRent(
+                    monthlyRent = monthlyRent,
+                    applicableDays = proration.applicableDays,
+                    daysInMonth = proration.daysInMonth
+                )
+                val dueDateStr = if (moveInDate.isNotBlank()) moveInDate else SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+                val cloudId = RentBillingEngine.generateDeterministicCloudId(
+                    propertyId = propId,
+                    tenantId = newId.toInt(),
+                    billingMonth = billingMonth
+                )
+                repository.insertRentPayment(
+                    RentPaymentEntity(
+                        cloudId = cloudId,
+                        tenantId = newId.toInt(),
+                        tenantName = trimmedName,
+                        roomNumber = trimmedRoom,
+                        billingMonth = billingMonth,
+                        amount = expectedRent,
+                        amountPaid = 0.0,
+                        dueDate = dueDateStr,
+                        paymentDate = null,
+                        paymentMode = null,
+                        status = "Pending",
+                        propertyId = propId
+                    )
+                )
+            }
         } catch (_: Exception) {
             // Non-critical: Do not fail tenant creation if initial ledger item creation encounters error
         }
@@ -215,6 +237,7 @@ class UpdateTenantUseCase @Inject constructor(
         address: String,
         occupation: String,
         companyOrCollege: String,
+        leavingDate: String = "",
         notes: String
     ): TenantValidationResult {
         val validation = validateTenantUseCase(
@@ -264,9 +287,22 @@ class UpdateTenantUseCase @Inject constructor(
             occupation = occupation,
             companyOrCollege = companyOrCollege,
             advancePaid = advancePaid,
+            leavingDate = leavingDate.trim(),
             notes = notes
         )
         repository.updateTenant(updatedTenant)
+        return TenantValidationResult.Success
+    }
+}
+
+class UpdateLeavingDateUseCase @Inject constructor(
+    private val repository: TenantRepository
+) {
+    suspend fun execute(id: Int, leavingDate: String): TenantValidationResult {
+        val tenant = repository.getTenantById(id)
+            ?: return TenantValidationResult.Error("Tenant not found.")
+        val updated = tenant.copy(leavingDate = leavingDate.trim())
+        repository.updateTenant(updated)
         return TenantValidationResult.Success
     }
 }
@@ -293,6 +329,7 @@ class VacateTenantUseCase @Inject constructor(
         val vacatedTenant = tenant.copy(
             roomNumber = "",
             bedId = "",
+            leavingDate = "",
             notes = vacatedNotes
         )
         
@@ -373,12 +410,15 @@ class SearchTenantUseCase @Inject constructor() {
             result = result.filter { !it.roomNumber.isBlank() }
         } else if (occupancyFilter == "Vacated") {
             result = result.filter { it.roomNumber.isBlank() }
+        } else if (occupancyFilter == "Leaving Soon" || occupancyFilter == "Leaving") {
+            result = result.filter { !it.roomNumber.isBlank() && it.leavingDate.isNotBlank() }
         }
 
         // 4. Sorting
         result = when (sortBy) {
             "Alphabetical" -> result.sortedBy { it.name.lowercase() }
             "Move-in Date" -> result.sortedByDescending { it.moveInDate }
+            "Leaving Date" -> result.sortedBy { if (it.leavingDate.isBlank()) "9999-99-99" else it.leavingDate }
             else -> result
         }
 

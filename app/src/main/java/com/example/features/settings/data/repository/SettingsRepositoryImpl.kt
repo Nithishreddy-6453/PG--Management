@@ -93,8 +93,8 @@ class SettingsRepositoryImpl @Inject constructor(
     override fun getAppSettings(): Flow<AppSettings> {
         return dataStore.data.map { preferences ->
             AppSettings(
-                theme = AppTheme.valueOf(preferences[PreferencesKeys.THEME] ?: AppTheme.SYSTEM.name),
-                dynamicColor = preferences[PreferencesKeys.DYNAMIC_COLOR] ?: true,
+                theme = AppTheme.valueOf(preferences[PreferencesKeys.THEME] ?: AppTheme.LIGHT.name),
+                dynamicColor = preferences[PreferencesKeys.DYNAMIC_COLOR] ?: false,
                 dateFormat = preferences[PreferencesKeys.DATE_FORMAT] ?: "dd/MM/yyyy",
                 numberFormat = preferences[PreferencesKeys.NUMBER_FORMAT] ?: "Indian",
                 language = preferences[PreferencesKeys.LANGUAGE] ?: "en"

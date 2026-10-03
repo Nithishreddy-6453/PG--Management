@@ -1,8 +1,6 @@
 package com.example.features.expenses
 
-import androidx.compose.runtime.collectAsState
 import android.widget.Toast
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -15,11 +13,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.example.core.language.GlobalLanguageToggle
+import com.example.core.language.rememberTranslation
 import com.example.features.expenses.ui.viewmodel.EditExpenseUiEffect
 import com.example.features.expenses.ui.viewmodel.EditExpenseUiEvent
 import com.example.features.expenses.ui.viewmodel.EditExpenseViewModel
@@ -36,10 +37,11 @@ fun EditExpenseScreen(
     val scrollState = rememberScrollState()
 
     val categories = listOf(
-        "Electricity", "Water", "Internet", "Maintenance", 
-        "Cleaning", "Staff Salary", "Food", "Repairs", "Furniture", "Miscellaneous"
+        "Electricity", "Water", "Internet", "Maintenance", "Cleaning",
+        "Repairs", "Staff Salary", "Food", "Furniture", "Security",
+        "Property Tax", "Rent/Lease", "Appliances", "Utilities", "Other"
     )
-    val paymentMethods = listOf("Cash", "UPI", "Bank Transfer", "Card")
+    val paymentMethods = listOf("UPI", "Cash", "Bank Transfer", "Card")
 
     var categoryExpanded by remember { mutableStateOf(false) }
     var paymentMethodExpanded by remember { mutableStateOf(false) }
@@ -58,30 +60,37 @@ fun EditExpenseScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Edit Operational Expense", fontWeight = FontWeight.Bold) },
+                title = {
+                    Text(
+                        text = rememberTranslation("Edit"),
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back"
+                            contentDescription = rememberTranslation("Back")
                         )
                     }
                 },
+                actions = {
+                    GlobalLanguageToggle(modifier = Modifier.padding(end = 8.dp))
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surface
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
                 ),
                 modifier = Modifier.testTag("edit_expense_top_bar")
             )
         },
+        containerColor = MaterialTheme.colorScheme.background,
         modifier = modifier.testTag("edit_expense_screen_container")
     ) { innerPadding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .background(MaterialTheme.colorScheme.background)
         ) {
             if (uiState.isFetching) {
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
@@ -98,7 +107,7 @@ fun EditExpenseScreen(
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     Button(onClick = onBackClick) {
-                        Text("Go Back")
+                        Text(rememberTranslation("Back"))
                     }
                 }
             } else {
@@ -106,42 +115,34 @@ fun EditExpenseScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(scrollState)
-                        .padding(24.dp),
+                        .padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     // Validation Error Alert
                     if (uiState.validationError != null) {
                         Card(
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                            shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth().testTag("validation_error_box")
                         ) {
-                            Row(
-                                modifier = Modifier.padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = uiState.validationError ?: "Validation Error",
-                                    color = MaterialTheme.colorScheme.onErrorContainer,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
+                            Text(
+                                text = uiState.validationError ?: "Validation Error",
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(14.dp)
+                            )
                         }
                     }
 
-                    // Expense Title
+                    // Title
                     OutlinedTextField(
                         value = uiState.title,
                         onValueChange = { viewModel.onEvent(EditExpenseUiEvent.TitleChanged(it)) },
                         label = { Text("Expense Title *") },
-                        placeholder = { Text("e.g. July Internet Subscription") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth().testTag("expense_title_input"),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
-                        )
+                        shape = RoundedCornerShape(12.dp)
                     )
 
                     // Category Dropdown
@@ -151,29 +152,26 @@ fun EditExpenseScreen(
                             onExpandedChange = { categoryExpanded = it }
                         ) {
                             OutlinedTextField(
-                                value = uiState.category,
+                                value = rememberTranslation(uiState.category),
                                 onValueChange = {},
                                 readOnly = true,
-                                label = { Text("Category *") },
+                                label = { Text("${rememberTranslation("Category")} *") },
                                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryExpanded) },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .menuAnchor(MenuAnchorType.PrimaryNotEditable)
                                     .testTag("expense_category_dropdown"),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
-                                )
+                                shape = RoundedCornerShape(12.dp)
                             )
                             ExposedDropdownMenu(
                                 expanded = categoryExpanded,
                                 onDismissRequest = { categoryExpanded = false }
                             ) {
-                                categories.forEach { category ->
+                                categories.forEach { cat ->
                                     DropdownMenuItem(
-                                        text = { Text(category) },
+                                        text = { Text(rememberTranslation(cat)) },
                                         onClick = {
-                                            viewModel.onEvent(EditExpenseUiEvent.CategoryChanged(category))
+                                            viewModel.onEvent(EditExpenseUiEvent.CategoryChanged(cat))
                                             categoryExpanded = false
                                         }
                                     )
@@ -182,61 +180,45 @@ fun EditExpenseScreen(
                         }
                     }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        // Amount Input
-                        OutlinedTextField(
-                            value = uiState.amount,
-                            onValueChange = { viewModel.onEvent(EditExpenseUiEvent.AmountChanged(it)) },
-                            label = { Text("Amount (₹) *") },
-                            placeholder = { Text("0.00") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            singleLine = true,
-                            modifier = Modifier.weight(1f).testTag("expense_amount_input"),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
-                            )
-                        )
+                    // Amount
+                    OutlinedTextField(
+                        value = uiState.amount,
+                        onValueChange = { viewModel.onEvent(EditExpenseUiEvent.AmountChanged(it)) },
+                        label = { Text("${rememberTranslation("Expected Amount")} (₹) *") },
+                        prefix = { Text("₹ ", fontWeight = FontWeight.Bold) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("expense_amount_input"),
+                        shape = RoundedCornerShape(12.dp)
+                    )
 
-                        // Date Input
-                        OutlinedTextField(
-                            value = uiState.date,
-                            onValueChange = { viewModel.onEvent(EditExpenseUiEvent.DateChanged(it)) },
-                            label = { Text("Date *") },
-                            placeholder = { Text("YYYY-MM-DD") },
-                            trailingIcon = { Icon(imageVector = Icons.Default.CalendarToday, contentDescription = null) },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f).testTag("expense_date_input"),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
-                            )
-                        )
-                    }
+                    // Expense Date
+                    OutlinedTextField(
+                        value = uiState.date,
+                        onValueChange = { viewModel.onEvent(EditExpenseUiEvent.DateChanged(it)) },
+                        label = { Text("${rememberTranslation("Expense Date")} (YYYY-MM-DD) *") },
+                        trailingIcon = { Icon(Icons.Default.CalendarToday, contentDescription = null) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("expense_date_input"),
+                        shape = RoundedCornerShape(12.dp)
+                    )
 
-                    // Payment Method Selector Dropdown
+                    // Payment Method Dropdown
                     Box(modifier = Modifier.fillMaxWidth()) {
                         ExposedDropdownMenuBox(
                             expanded = paymentMethodExpanded,
                             onExpandedChange = { paymentMethodExpanded = it }
                         ) {
                             OutlinedTextField(
-                                value = uiState.paymentMethod,
+                                value = rememberTranslation(uiState.paymentMethod),
                                 onValueChange = {},
                                 readOnly = true,
-                                label = { Text("Payment Method *") },
+                                label = { Text(rememberTranslation("Payment Method")) },
                                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = paymentMethodExpanded) },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                                    .testTag("expense_payment_dropdown"),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
-                                )
+                                    .menuAnchor(MenuAnchorType.PrimaryNotEditable),
+                                shape = RoundedCornerShape(12.dp)
                             )
                             ExposedDropdownMenu(
                                 expanded = paymentMethodExpanded,
@@ -244,7 +226,7 @@ fun EditExpenseScreen(
                             ) {
                                 paymentMethods.forEach { method ->
                                     DropdownMenuItem(
-                                        text = { Text(method) },
+                                        text = { Text(rememberTranslation(method)) },
                                         onClick = {
                                             viewModel.onEvent(EditExpenseUiEvent.PaymentMethodChanged(method))
                                             paymentMethodExpanded = false
@@ -255,54 +237,45 @@ fun EditExpenseScreen(
                         }
                     }
 
-                    // Vendor Input (Optional)
+                    // Vendor
                     OutlinedTextField(
                         value = uiState.vendor,
                         onValueChange = { viewModel.onEvent(EditExpenseUiEvent.VendorChanged(it)) },
-                        label = { Text("Vendor / Payee (Optional)") },
-                        placeholder = { Text("e.g. BESCOM Office, Supermarket") },
+                        label = { Text("${rememberTranslation("Vendor")} / ${rememberTranslation("Payee")}") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth().testTag("expense_vendor_input"),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
-                        )
+                        shape = RoundedCornerShape(12.dp)
                     )
 
-                    // Notes / Remarks
+                    // Notes
                     OutlinedTextField(
                         value = uiState.notes,
                         onValueChange = { viewModel.onEvent(EditExpenseUiEvent.NotesChanged(it)) },
-                        label = { Text("Notes / Descriptions") },
-                        placeholder = { Text("Enter any receipts or invoice details...") },
-                        minLines = 3,
-                        maxLines = 5,
+                        label = { Text(rememberTranslation("Notes")) },
+                        minLines = 2,
                         modifier = Modifier.fillMaxWidth().testTag("expense_notes_input"),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
-                        )
+                        shape = RoundedCornerShape(12.dp)
                     )
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                    // Save Button
                     Button(
                         onClick = { viewModel.onEvent(EditExpenseUiEvent.SaveExpense) },
                         enabled = !uiState.isLoading,
-                        shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(52.dp)
-                            .testTag("save_expense_button")
+                            .testTag("save_expense_button"),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
                     ) {
                         if (uiState.isLoading) {
-                            CircularProgressIndicator(
-                                color = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.size(80.dp)
-                            )
+                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp))
                         } else {
-                            Text("Update Expense", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                text = rememberTranslation("Save"),
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            )
                         }
                     }
                 }

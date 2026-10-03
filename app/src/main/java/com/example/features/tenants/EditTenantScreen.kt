@@ -58,6 +58,11 @@ fun EditTenantScreen(
                         Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
+                actions = {
+                    com.example.core.language.GlobalLanguageToggle(
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
                     titleContentColor = MaterialTheme.colorScheme.onBackground,
@@ -354,7 +359,7 @@ fun EditTenantScreen(
                     }
 
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(bottom = spacing.large),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = spacing.small),
                         horizontalArrangement = Arrangement.spacedBy(spacing.small)
                     ) {
                         OutlinedTextField(
@@ -373,6 +378,22 @@ fun EditTenantScreen(
                             singleLine = true
                         )
                     }
+
+                    OutlinedTextField(
+                        value = state.leavingDate,
+                        onValueChange = { viewModel.onLeavingDateChanged(it) },
+                        label = { Text("Leaving Date (Optional)") },
+                        placeholder = { Text("YYYY-MM-DD") },
+                        trailingIcon = {
+                            if (state.leavingDate.isNotBlank()) {
+                                IconButton(onClick = { viewModel.onLeavingDateChanged("") }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear Leaving Date")
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(bottom = spacing.large).testTag("edit_tenant_leaving_date_input"),
+                        singleLine = true
+                    )
 
                     // SECTION 3: DOCUMENTS & NOTES
                     Text(

@@ -71,6 +71,11 @@ fun AddTenantScreen(
                         Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
+                actions = {
+                    com.example.core.language.GlobalLanguageToggle(
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
                     titleContentColor = MaterialTheme.colorScheme.onBackground,
@@ -399,7 +404,7 @@ fun AddTenantScreen(
                 }
 
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = spacing.large),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = spacing.small),
                     horizontalArrangement = Arrangement.spacedBy(spacing.small)
                 ) {
                     OutlinedTextField(
@@ -418,6 +423,22 @@ fun AddTenantScreen(
                         singleLine = true
                     )
                 }
+
+                OutlinedTextField(
+                    value = state.leavingDate,
+                    onValueChange = { viewModel.onLeavingDateChanged(it) },
+                    label = { Text("Leaving Date (Optional)") },
+                    placeholder = { Text("YYYY-MM-DD") },
+                    trailingIcon = {
+                        if (state.leavingDate.isNotBlank()) {
+                            IconButton(onClick = { viewModel.onLeavingDateChanged("") }) {
+                                Icon(Icons.Default.Close, contentDescription = "Clear Leaving Date")
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = spacing.large).testTag("onboard_leaving_date_input"),
+                    singleLine = true
+                )
 
                 // CATEGORY 3: DOCUMENTS, IDENTIFICATION & NOTES
                 Text(

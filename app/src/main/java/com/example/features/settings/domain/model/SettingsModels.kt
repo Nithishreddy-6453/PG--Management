@@ -13,8 +13,8 @@ data class BusinessSettings(
 )
 
 data class AppSettings(
-    val theme: AppTheme = AppTheme.SYSTEM,
-    val dynamicColor: Boolean = true,
+    val theme: AppTheme = AppTheme.LIGHT,
+    val dynamicColor: Boolean = false,
     val dateFormat: String = "dd/MM/yyyy",
     val numberFormat: String = "Indian",
     val language: String = "en"

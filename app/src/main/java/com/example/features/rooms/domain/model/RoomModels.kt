@@ -2,10 +2,14 @@ package com.example.features.rooms.domain.model
 
 import com.example.data.database.RoomEntity
 import com.example.data.database.TenantEntity
+import com.example.data.database.BedEntity
+import com.example.data.database.BedAssignmentEntity
 
 data class RoomSummary(
     val room: RoomEntity,
-    val tenants: List<TenantEntity>
+    val tenants: List<TenantEntity>,
+    val beds: List<BedEntity> = emptyList(),
+    val assignments: List<BedAssignmentEntity> = emptyList()
 ) {
     val roomNumber: String get() = room.roomNumber
     val floor: String get() = room.floor
@@ -13,25 +17,37 @@ data class RoomSummary(
     val ratePerBed: Double get() = room.ratePerBed
     val roomType: String get() = room.roomType
     val notes: String get() = room.notes
-    
-    val activeTenants: List<TenantEntity> get() = tenants.filter { !it.deleted && it.roomNumber.isNotBlank() }
-    val occupiedBeds: Int get() = activeTenants.size
-    val availableBeds: Int get() = (totalBeds - occupiedBeds).coerceAtLeast(0)
-    
-    val activeTenantCount: Int get() = activeTenants.size
-    
-    val occupancyStatus: String get() = when {
-        occupiedBeds == 0 -> "Empty"
-        availableBeds == 0 -> "Full"
-        else -> "Available"
+    val isActive: Boolean get() = room.isActive
+
+    val blockedBeds: Int get() = beds.count { it.status == "BLOCKED" }
+    val usableBeds: Int get() = (totalBeds - blockedBeds).coerceAtLeast(0)
+
+    val activeAssignments: List<BedAssignmentEntity> get() = assignments.filter { it.endDate == null }
+    val activeTenants: List<TenantEntity> get() {
+        val activeTenantIds = activeAssignments.map { it.tenantId }.toSet()
+        return tenants.filter { it.id in activeTenantIds || (!it.deleted && it.roomNumber == room.roomNumber && it.leavingDate.isBlank()) }
     }
     
-    val occupancyPercentage: Double get() = if (totalBeds > 0) {
-        (occupiedBeds.toDouble() / totalBeds) * 100.0
-    } else 0.0
+    val leavingTenants: List<TenantEntity> get() = activeTenants.filter { it.leavingDate.isNotBlank() }
+    val hasUpcomingVacancy: Boolean get() = leavingTenants.isNotEmpty()
     
-    val vacancyPercentage: Double get() = if (totalBeds > 0) {
-        (availableBeds.toDouble() / totalBeds) * 100.0
+    val occupiedBeds: Int get() = activeAssignments.size.coerceAtMost(usableBeds)
+    val availableBeds: Int get() = (usableBeds - occupiedBeds).coerceAtLeast(0)
+    
+    val activeTenantCount: Int get() = activeTenants.size
+
+    val occupancyStatus: String get() = when {
+        occupiedBeds == 0 -> "Empty"
+        availableBeds == 0 && usableBeds > 0 -> "Full"
+        else -> "Partially Occupied"
+    }
+    
+    val occupancyPercentage: Double get() = if (usableBeds > 0) {
+        (occupiedBeds.toDouble() / usableBeds.toDouble()) * 100.0
+    } else 0.0
+
+    val vacancyPercentage: Double get() = if (usableBeds > 0) {
+        (availableBeds.toDouble() / usableBeds.toDouble()) * 100.0
     } else 0.0
 }
 

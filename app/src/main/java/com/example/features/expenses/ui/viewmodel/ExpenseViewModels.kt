@@ -4,7 +4,9 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.features.expenses.domain.model.Expense
+import com.example.features.expenses.domain.model.ExpensePayment
 import com.example.features.expenses.domain.usecase.*
+import com.example.features.rent.domain.util.RentBillingEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -22,25 +24,34 @@ data class ExpenseListUiState(
     val filteredExpenses: List<Expense> = emptyList(),
     val searchQuery: String = "",
     val selectedCategory: String = "All",
-    val selectedMonth: String = "", // e.g. "2026-07"
+    val selectedStatus: String = "All", // "All", "Paid", "Partially Paid", "Unpaid"
     val selectedPaymentMethod: String = "All",
+    val selectedBillingMonth: String = "", // e.g. "October 2026"
     val sortBy: SortType = SortType.DATE_DESC,
     val error: String? = null,
     
-    // Stats
-    val totalMonthlyExpenses: Double = 0.0,
-    val todaysExpenses: Double = 0.0,
+    // Financial Summary for Selected Month
+    val totalExpenses: Double = 0.0,
+    val paidExpenses: Double = 0.0,
+    val outstandingExpenses: Double = 0.0,
+    val expenseCount: Int = 0,
     val categoryBreakdown: Map<String, Double> = emptyMap(),
-    val budgetLimit: Double = 50000.0,
-    val budgetUtilization: Double = 0.0
+    
+    // Tab selection: Expenses vs Recurring Templates
+    val showRecurringTab: Boolean = false
 )
 
 sealed class ExpenseListUiEvent {
     data class SearchChanged(val query: String) : ExpenseListUiEvent()
     data class CategoryFilterChanged(val category: String) : ExpenseListUiEvent()
+    data class StatusFilterChanged(val status: String) : ExpenseListUiEvent()
     data class MonthFilterChanged(val month: String) : ExpenseListUiEvent()
     data class PaymentMethodFilterChanged(val method: String) : ExpenseListUiEvent()
     data class SortOrderChanged(val sortType: SortType) : ExpenseListUiEvent()
+    data class TabChanged(val showRecurring: Boolean) : ExpenseListUiEvent()
+    object NextMonth : ExpenseListUiEvent()
+    object PreviousMonth : ExpenseListUiEvent()
+    object CurrentMonth : ExpenseListUiEvent()
     object Retry : ExpenseListUiEvent()
 }
 
@@ -55,9 +66,8 @@ class ExpenseListViewModel @Inject constructor(
     val state: StateFlow<ExpenseListUiState> = _state.asStateFlow()
 
     init {
-        // Set current month as default filter
-        val currentMonth = SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(Date())
-        _state.update { it.copy(selectedMonth = currentMonth) }
+        val currentBillingMonth = RentBillingEngine.formatCanonicalBillingMonth(Date())
+        _state.update { it.copy(selectedBillingMonth = currentBillingMonth) }
         loadExpenses()
     }
 
@@ -71,8 +81,12 @@ class ExpenseListViewModel @Inject constructor(
                 _state.update { it.copy(selectedCategory = event.category) }
                 applyFilters()
             }
+            is ExpenseListUiEvent.StatusFilterChanged -> {
+                _state.update { it.copy(selectedStatus = event.status) }
+                applyFilters()
+            }
             is ExpenseListUiEvent.MonthFilterChanged -> {
-                _state.update { it.copy(selectedMonth = event.month) }
+                _state.update { it.copy(selectedBillingMonth = event.month) }
                 applyFilters()
             }
             is ExpenseListUiEvent.PaymentMethodFilterChanged -> {
@@ -81,6 +95,27 @@ class ExpenseListViewModel @Inject constructor(
             }
             is ExpenseListUiEvent.SortOrderChanged -> {
                 _state.update { it.copy(sortBy = event.sortType) }
+                applyFilters()
+            }
+            is ExpenseListUiEvent.TabChanged -> {
+                _state.update { it.copy(showRecurringTab = event.showRecurring) }
+                applyFilters()
+            }
+            ExpenseListUiEvent.NextMonth -> {
+                val current = _state.value.selectedBillingMonth
+                val next = RentBillingEngine.getNextBillingMonth(current)
+                _state.update { it.copy(selectedBillingMonth = next) }
+                applyFilters()
+            }
+            ExpenseListUiEvent.PreviousMonth -> {
+                val current = _state.value.selectedBillingMonth
+                val prev = RentBillingEngine.getPreviousBillingMonth(current)
+                _state.update { it.copy(selectedBillingMonth = prev) }
+                applyFilters()
+            }
+            ExpenseListUiEvent.CurrentMonth -> {
+                val now = RentBillingEngine.formatCanonicalBillingMonth(Date())
+                _state.update { it.copy(selectedBillingMonth = now) }
                 applyFilters()
             }
             ExpenseListUiEvent.Retry -> {
@@ -109,39 +144,49 @@ class ExpenseListViewModel @Inject constructor(
 
     private fun applyFilters() {
         val currentList = _state.value.expenses
+        val billingMonth = _state.value.selectedBillingMonth
+        val parsedMonth = RentBillingEngine.parseBillingMonth(billingMonth)
+        val monthPrefix = String.format("%04d-%02d", parsedMonth.year, parsedMonth.month1Based)
+
+        // Filter by selected billing month first
+        val monthExpenses = currentList.filter {
+            it.date.startsWith(monthPrefix) || it.date.contains(parsedMonth.canonicalName, ignoreCase = true)
+        }
+
+        // Compute Financial Totals for this selected billing month
+        val totalAmount = monthExpenses.sumOf { it.amount }
+        val paidAmount = monthExpenses.sumOf { it.paidAmount }
+        val outstandingAmount = monthExpenses.sumOf { it.remainingAmount }
+        val count = monthExpenses.size
+        val breakdown = monthExpenses.groupBy { it.category }
+            .mapValues { entry -> entry.value.sumOf { it.amount } }
+
+        // Now filter by category, status, payment method, query
+        val listToFilter = if (_state.value.showRecurringTab) {
+            currentList.filter { it.isRecurring }
+        } else {
+            monthExpenses
+        }
+
         val filtered = filterExpensesUseCase(
-            expenses = currentList,
+            expenses = listToFilter,
             category = _state.value.selectedCategory,
-            month = _state.value.selectedMonth,
+            month = null, // Already filtered by monthPrefix
             paymentMethod = _state.value.selectedPaymentMethod,
+            paymentStatus = _state.value.selectedStatus,
             sortBy = _state.value.sortBy
         )
-        
+
         val searched = searchExpensesUseCase(filtered, _state.value.searchQuery)
-        
-        // Compute statistics on the entire list of expenses for the selected month to get accurate dashboard metrics
-        val currentMonthStr = _state.value.selectedMonth.ifEmpty {
-            SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(Date())
-        }
-        val monthlyExpenses = currentList.filter { it.date.startsWith(currentMonthStr) }
-        val totalMonthly = monthlyExpenses.sumOf { it.amount }
-        
-        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-        val todaysExpenses = currentList.filter { it.date == todayStr }.sumOf { it.amount }
-        
-        val breakdown = monthlyExpenses.groupBy { it.category }
-            .mapValues { entry -> entry.value.sumOf { it.amount } }
-            
-        val budgetLimit = _state.value.budgetLimit
-        val budgetUtil = if (budgetLimit > 0) (totalMonthly / budgetLimit) * 100.0 else 0.0
 
         _state.update {
             it.copy(
                 filteredExpenses = searched,
-                totalMonthlyExpenses = totalMonthly,
-                todaysExpenses = todaysExpenses,
-                categoryBreakdown = breakdown,
-                budgetUtilization = budgetUtil
+                totalExpenses = totalAmount,
+                paidExpenses = paidAmount,
+                outstandingExpenses = outstandingAmount,
+                expenseCount = count,
+                categoryBreakdown = breakdown
             )
         }
     }
@@ -155,11 +200,19 @@ class ExpenseListViewModel @Inject constructor(
 data class ExpenseDetailsUiState(
     val isLoading: Boolean = false,
     val expense: Expense? = null,
-    val error: String? = null
+    val error: String? = null,
+    val isRecordingPayment: Boolean = false
 )
 
 sealed class ExpenseDetailsUiEvent {
     object DeleteExpense : ExpenseDetailsUiEvent()
+    data class RecordPayment(
+        val amount: Double,
+        val paymentDate: String,
+        val paymentMethod: String,
+        val reference: String,
+        val notes: String
+    ) : ExpenseDetailsUiEvent()
 }
 
 sealed class ExpenseDetailsUiEffect {
@@ -171,6 +224,7 @@ sealed class ExpenseDetailsUiEffect {
 class ExpenseDetailsViewModel @Inject constructor(
     private val getExpenseDetailsUseCase: GetExpenseDetailsUseCase,
     private val deleteExpenseUseCase: DeleteExpenseUseCase,
+    private val recordExpensePaymentUseCase: RecordExpensePaymentUseCase,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -191,7 +245,7 @@ class ExpenseDetailsViewModel @Inject constructor(
         }
     }
 
-    private fun loadExpenseDetails(id: Int) {
+    fun loadExpenseDetails(id: Int = expenseId) {
         _state.update { it.copy(isLoading = true, error = null) }
         viewModelScope.launch {
             try {
@@ -220,6 +274,28 @@ class ExpenseDetailsViewModel @Inject constructor(
                     }
                 }
             }
+            is ExpenseDetailsUiEvent.RecordPayment -> {
+                viewModelScope.launch {
+                    try {
+                        _state.update { it.copy(isRecordingPayment = true) }
+                        val payment = ExpensePayment(
+                            id = UUID.randomUUID().toString(),
+                            amount = event.amount,
+                            paymentDate = event.paymentDate,
+                            paymentMethod = event.paymentMethod,
+                            reference = event.reference,
+                            notes = event.notes
+                        )
+                        recordExpensePaymentUseCase(expenseId, payment)
+                        loadExpenseDetails(expenseId)
+                        _state.update { it.copy(isRecordingPayment = false) }
+                        _effects.emit(ExpenseDetailsUiEffect.ShowToast("Payment recorded successfully"))
+                    } catch (e: Exception) {
+                        _state.update { it.copy(isRecordingPayment = false) }
+                        _effects.emit(ExpenseDetailsUiEffect.ShowToast("Failed to record payment: ${e.message}"))
+                    }
+                }
+            }
         }
     }
 }
@@ -231,12 +307,24 @@ class ExpenseDetailsViewModel @Inject constructor(
 
 data class AddExpenseUiState(
     val title: String = "",
-    val category: String = "Miscellaneous",
+    val category: String = "Electricity",
     val amount: String = "",
     val date: String = "",
-    val paymentMethod: String = "Cash",
     val vendor: String = "",
     val notes: String = "",
+    
+    // Payment Status & Details
+    val paymentStatus: String = "Paid", // "Paid" or "Unpaid"
+    val paymentDate: String = "",
+    val paymentMethod: String = "UPI",
+    val paymentReference: String = "",
+    
+    // Recurring Options
+    val isRecurring: Boolean = false,
+    val recurringFrequency: String = "Monthly", // "Monthly" or "Yearly"
+    val recurringStartDate: String = "",
+    val recurringEndDate: String = "",
+    
     val isLoading: Boolean = false,
     val validationError: String? = null,
     val isSuccess: Boolean = false
@@ -247,9 +335,15 @@ sealed class AddExpenseUiEvent {
     data class CategoryChanged(val category: String) : AddExpenseUiEvent()
     data class AmountChanged(val amount: String) : AddExpenseUiEvent()
     data class DateChanged(val date: String) : AddExpenseUiEvent()
-    data class PaymentMethodChanged(val method: String) : AddExpenseUiEvent()
     data class VendorChanged(val vendor: String) : AddExpenseUiEvent()
     data class NotesChanged(val notes: String) : AddExpenseUiEvent()
+    data class PaymentStatusChanged(val status: String) : AddExpenseUiEvent()
+    data class PaymentDateChanged(val date: String) : AddExpenseUiEvent()
+    data class PaymentMethodChanged(val method: String) : AddExpenseUiEvent()
+    data class PaymentReferenceChanged(val ref: String) : AddExpenseUiEvent()
+    data class RecurringToggled(val isRecurring: Boolean) : AddExpenseUiEvent()
+    data class RecurringFrequencyChanged(val freq: String) : AddExpenseUiEvent()
+    data class RecurringEndDateChanged(val date: String) : AddExpenseUiEvent()
     object SaveExpense : AddExpenseUiEvent()
 }
 
@@ -271,9 +365,14 @@ class AddExpenseViewModel @Inject constructor(
     val effects: SharedFlow<AddExpenseUiEffect> = _effects.asSharedFlow()
 
     init {
-        // Set today's date as default
-        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-        _state.update { it.copy(date = todayStr) }
+        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        _state.update {
+            it.copy(
+                date = todayStr,
+                paymentDate = todayStr,
+                recurringStartDate = todayStr
+            )
+        }
     }
 
     fun onEvent(event: AddExpenseUiEvent) {
@@ -282,9 +381,15 @@ class AddExpenseViewModel @Inject constructor(
             is AddExpenseUiEvent.CategoryChanged -> _state.update { it.copy(category = event.category) }
             is AddExpenseUiEvent.AmountChanged -> _state.update { it.copy(amount = event.amount) }
             is AddExpenseUiEvent.DateChanged -> _state.update { it.copy(date = event.date) }
-            is AddExpenseUiEvent.PaymentMethodChanged -> _state.update { it.copy(paymentMethod = event.method) }
             is AddExpenseUiEvent.VendorChanged -> _state.update { it.copy(vendor = event.vendor) }
             is AddExpenseUiEvent.NotesChanged -> _state.update { it.copy(notes = event.notes) }
+            is AddExpenseUiEvent.PaymentStatusChanged -> _state.update { it.copy(paymentStatus = event.status) }
+            is AddExpenseUiEvent.PaymentDateChanged -> _state.update { it.copy(paymentDate = event.date) }
+            is AddExpenseUiEvent.PaymentMethodChanged -> _state.update { it.copy(paymentMethod = event.method) }
+            is AddExpenseUiEvent.PaymentReferenceChanged -> _state.update { it.copy(paymentReference = event.ref) }
+            is AddExpenseUiEvent.RecurringToggled -> _state.update { it.copy(isRecurring = event.isRecurring) }
+            is AddExpenseUiEvent.RecurringFrequencyChanged -> _state.update { it.copy(recurringFrequency = event.freq) }
+            is AddExpenseUiEvent.RecurringEndDateChanged -> _state.update { it.copy(recurringEndDate = event.date) }
             AddExpenseUiEvent.SaveExpense -> saveExpense()
         }
     }
@@ -306,15 +411,45 @@ class AddExpenseViewModel @Inject constructor(
                 _state.update { it.copy(isLoading = true, validationError = null) }
                 viewModelScope.launch {
                     try {
+                        val parsedAmount = currentState.amount.toDouble()
+                        val isPaid = currentState.paymentStatus.equals("Paid", ignoreCase = true)
+                        val paidAmount = if (isPaid) parsedAmount else 0.0
+                        val remainingAmount = if (isPaid) 0.0 else parsedAmount
+                        val status = if (isPaid) "Paid" else "Unpaid"
+
+                        val initialPayments = if (isPaid) {
+                            listOf(
+                                ExpensePayment(
+                                    id = UUID.randomUUID().toString(),
+                                    amount = parsedAmount,
+                                    paymentDate = currentState.paymentDate.ifBlank { currentState.date },
+                                    paymentMethod = currentState.paymentMethod,
+                                    reference = currentState.paymentReference,
+                                    notes = "Initial Payment"
+                                )
+                            )
+                        } else emptyList()
+
                         val newExpense = Expense(
-                            title = currentState.title,
+                            title = currentState.title.trim(),
                             category = currentState.category,
-                            amount = currentState.amount.toDouble(),
+                            amount = parsedAmount,
+                            paidAmount = paidAmount,
+                            remainingAmount = remainingAmount,
+                            status = status,
                             date = currentState.date,
+                            paymentDate = if (isPaid) currentState.paymentDate else null,
                             paymentMethod = currentState.paymentMethod,
-                            vendor = currentState.vendor.ifBlank { null },
-                            notes = currentState.notes
+                            vendor = currentState.vendor.trim().ifBlank { null },
+                            notes = currentState.notes.trim(),
+                            isRecurring = currentState.isRecurring,
+                            recurringFrequency = if (currentState.isRecurring) currentState.recurringFrequency else null,
+                            recurringStartDate = if (currentState.isRecurring) currentState.date else null,
+                            recurringEndDate = if (currentState.isRecurring) currentState.recurringEndDate.ifBlank { null } else null,
+                            recurringExpenseId = if (currentState.isRecurring) "rec_${UUID.randomUUID()}" else null,
+                            payments = initialPayments
                         )
+
                         addExpenseUseCase(newExpense)
                         _state.update { it.copy(isLoading = false, isSuccess = true) }
                         _effects.emit(AddExpenseUiEffect.ShowMessage("Expense added successfully"))
@@ -342,11 +477,15 @@ data class EditExpenseUiState(
     val paymentMethod: String = "",
     val vendor: String = "",
     val notes: String = "",
+    val status: String = "Paid",
+    val paidAmount: Double = 0.0,
+    val remainingAmount: Double = 0.0,
     val isLoading: Boolean = false,
     val isFetching: Boolean = false,
     val validationError: String? = null,
     val isSuccess: Boolean = false,
-    val fetchError: String? = null
+    val fetchError: String? = null,
+    val existingPayments: List<ExpensePayment> = emptyList()
 )
 
 sealed class EditExpenseUiEvent {
@@ -379,6 +518,8 @@ class EditExpenseViewModel @Inject constructor(
     private val _effects = MutableSharedFlow<EditExpenseUiEffect>()
     val effects: SharedFlow<EditExpenseUiEffect> = _effects.asSharedFlow()
 
+    private var originalExpense: Expense? = null
+
     init {
         val id = savedStateHandle.get<String>("expenseId")?.toIntOrNull() ?: -1
         if (id != -1) {
@@ -395,6 +536,7 @@ class EditExpenseViewModel @Inject constructor(
             try {
                 val expense = getExpenseDetailsUseCase(id)
                 if (expense != null) {
+                    originalExpense = expense
                     _state.update {
                         it.copy(
                             isFetching = false,
@@ -404,7 +546,11 @@ class EditExpenseViewModel @Inject constructor(
                             date = expense.date,
                             paymentMethod = expense.paymentMethod,
                             vendor = expense.vendor ?: "",
-                            notes = expense.notes
+                            notes = expense.notes,
+                            status = expense.status,
+                            paidAmount = expense.paidAmount,
+                            remainingAmount = expense.remainingAmount,
+                            existingPayments = expense.payments
                         )
                     }
                 } else {
@@ -446,17 +592,34 @@ class EditExpenseViewModel @Inject constructor(
                 _state.update { it.copy(isLoading = true, validationError = null) }
                 viewModelScope.launch {
                     try {
-                        val updatedExpense = Expense(
+                        val parsedAmount = currentState.amount.toDouble()
+                        val currentPaid = currentState.paidAmount
+                        val newRemaining = (parsedAmount - currentPaid).coerceAtLeast(0.0)
+                        val newStatus = when {
+                            newRemaining <= 0.001 && currentPaid > 0 -> "Paid"
+                            currentPaid > 0.001 -> "Partially Paid"
+                            else -> "Unpaid"
+                        }
+
+                        val updated = (originalExpense ?: Expense(
                             id = currentState.expenseId,
                             title = currentState.title,
                             category = currentState.category,
-                            amount = currentState.amount.toDouble(),
+                            amount = parsedAmount,
+                            date = currentState.date
+                        )).copy(
+                            title = currentState.title.trim(),
+                            category = currentState.category,
+                            amount = parsedAmount,
+                            remainingAmount = newRemaining,
+                            status = newStatus,
                             date = currentState.date,
                             paymentMethod = currentState.paymentMethod,
-                            vendor = currentState.vendor.ifBlank { null },
-                            notes = currentState.notes
+                            vendor = currentState.vendor.trim().ifBlank { null },
+                            notes = currentState.notes.trim()
                         )
-                        updateExpenseUseCase(updatedExpense)
+
+                        updateExpenseUseCase(updated)
                         _state.update { it.copy(isLoading = false, isSuccess = true) }
                         _effects.emit(EditExpenseUiEffect.ShowMessage("Expense updated successfully"))
                         _effects.emit(EditExpenseUiEffect.NavigateBack)

@@ -41,6 +41,11 @@ fun PaymentScreen(
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
+                },
+                actions = {
+                    com.example.core.language.GlobalLanguageToggle(
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
                 }
             )
         }

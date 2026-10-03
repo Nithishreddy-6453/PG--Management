@@ -1,6 +1,7 @@
 package com.example.features.expenses.domain.usecase
 
 import com.example.features.expenses.domain.model.Expense
+import com.example.features.expenses.domain.model.ExpensePayment
 import com.example.features.expenses.domain.repository.ExpenseRepository
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
@@ -29,6 +30,22 @@ class DeleteExpenseUseCase @Inject constructor(
     }
 }
 
+class RecordExpensePaymentUseCase @Inject constructor(
+    private val repository: ExpenseRepository
+) {
+    suspend operator fun invoke(expenseId: Int, payment: ExpensePayment) {
+        repository.recordPayment(expenseId, payment)
+    }
+}
+
+class GenerateRecurringExpensesUseCase @Inject constructor(
+    private val repository: ExpenseRepository
+) {
+    suspend operator fun invoke(expense: Expense, monthsCount: Int = 3) {
+        repository.generateRecurringExpenses(expense, monthsCount)
+    }
+}
+
 class GetExpensesUseCase @Inject constructor(
     private val repository: ExpenseRepository
 ) {
@@ -51,7 +68,8 @@ class SearchExpensesUseCase @Inject constructor() {
         return expenses.filter {
             it.title.contains(query, ignoreCase = true) ||
             it.category.contains(query, ignoreCase = true) ||
-            it.notes.contains(query, ignoreCase = true)
+            it.notes.contains(query, ignoreCase = true) ||
+            (it.vendor?.contains(query, ignoreCase = true) == true)
         }
     }
 }
@@ -60,8 +78,9 @@ class FilterExpensesUseCase @Inject constructor() {
     operator fun invoke(
         expenses: List<Expense>,
         category: String?,
-        month: String?, // e.g. "2026-07"
+        month: String?, // e.g. "2026-10" or "October 2026"
         paymentMethod: String?,
+        paymentStatus: String? = null, // "All", "Paid", "Partially Paid", "Unpaid"
         sortBy: SortType = SortType.DATE_DESC
     ): List<Expense> {
         var result = expenses
@@ -71,11 +90,17 @@ class FilterExpensesUseCase @Inject constructor() {
         }
 
         if (!month.isNullOrBlank()) {
-            result = result.filter { it.date.startsWith(month) }
+            result = result.filter { 
+                it.date.startsWith(month) || it.date.contains(month, ignoreCase = true)
+            }
         }
 
         if (!paymentMethod.isNullOrBlank() && paymentMethod != "All") {
             result = result.filter { it.paymentMethod.equals(paymentMethod, ignoreCase = true) }
+        }
+
+        if (!paymentStatus.isNullOrBlank() && paymentStatus != "All") {
+            result = result.filter { it.status.equals(paymentStatus, ignoreCase = true) }
         }
 
         return when (sortBy) {

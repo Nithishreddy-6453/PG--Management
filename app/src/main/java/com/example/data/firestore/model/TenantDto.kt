@@ -27,6 +27,7 @@ data class TenantDto(
     val occupation: String = "",
     val companyOrCollege: String = "",
     val advancePaid: Double = 0.0,
+    val leavingDate: String = "",
     val notes: String = "",
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),

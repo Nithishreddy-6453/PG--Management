@@ -71,12 +71,28 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         
         // 1. Enable modern edge-to-edge system bar overlays
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = androidx.activity.SystemBarStyle.auto(
+                android.graphics.Color.TRANSPARENT,
+                android.graphics.Color.TRANSPARENT
+            ),
+            navigationBarStyle = androidx.activity.SystemBarStyle.auto(
+                android.graphics.Color.TRANSPARENT,
+                android.graphics.Color.TRANSPARENT
+            )
+        )
+
+        com.example.core.language.AppLanguageManager.init(this)
 
         setContent {
             val appSettings by settingsRepository.getAppSettings().collectAsState(initial = AppSettings())
             val securitySettings by settingsRepository.getSecuritySettings().collectAsState(initial = com.example.features.settings.domain.model.SecuritySettings())
-            PgTheme(appTheme = appSettings.theme, dynamicColor = appSettings.dynamicColor) {
+            val currentLanguage by com.example.core.language.AppLanguageManager.languageFlow.collectAsState()
+            
+            androidx.compose.runtime.CompositionLocalProvider(
+                com.example.core.language.LocalAppLanguage provides currentLanguage
+            ) {
+                PgTheme(appTheme = appSettings.theme, dynamicColor = appSettings.dynamicColor) {
                 val navController = rememberNavController()
                 var appBackgroundTime by remember { mutableStateOf(0L) }
                 val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
@@ -104,12 +120,12 @@ class MainActivity : ComponentActivity() {
 
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
-                    contentWindowInsets = WindowInsets.systemBars
-                ) { innerPadding ->
+                    contentWindowInsets = WindowInsets(0, 0, 0, 0)
+                ) { _ ->
                     NavHost(
                         navController = navController,
                         startDestination = Screen.Splash.route,
-                        modifier = Modifier.padding(innerPadding)
+                        modifier = Modifier.fillMaxSize()
                     ) {
                         // A. Splash Screen Entry Route
                         composable(route = Screen.Splash.route) {
@@ -247,7 +263,16 @@ class MainActivity : ComponentActivity() {
                                 onBackClick = { navController.popBackStack() },
                                 onAddRoomClick = { navController.navigate(Screen.AddRoom.route) },
                                 onRoomDetailsClick = { id -> navController.navigate(Screen.RoomDetails.createRoute(id)) },
-                                onEditRoomClick = { id -> navController.navigate(Screen.EditRoom.createRoute(id)) }
+                                onEditRoomClick = { id -> navController.navigate(Screen.EditRoom.createRoute(id)) },
+                                onNavigate = { route ->
+                                    navController.navigate(route) {
+                                        popUpTo(navController.graph.startDestinationId) {
+                                            saveState = true
+                                        }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                }
                             )
                         }
 
@@ -286,7 +311,8 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onImportExcelClick = {
                                     navController.navigate(Screen.ExcelImport.route)
-                                }
+                                },
+                                onNavigate = { route -> navController.navigate(route) }
                             )
                         }
 
@@ -317,6 +343,34 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
+                        // G.4 Google Form Tenant Registration Setup Route
+                        composable(route = Screen.TenantRegistrationForm.route) {
+                            com.example.features.googleform.ui.TenantRegistrationFormScreen(
+                                viewModel = hiltViewModel(),
+                                onBackClick = { navController.popBackStack() },
+                                onNavigateToPending = { navController.navigate(Screen.PendingRegistrations.route) }
+                            )
+                        }
+
+                        // G.5 Pending Tenant Registrations (Google Form Submissions)
+                        composable(route = Screen.PendingRegistrations.route) {
+                            com.example.features.googleform.ui.PendingRegistrationsScreen(
+                                viewModel = hiltViewModel(),
+                                onBackClick = { navController.popBackStack() },
+                                onRegistrationClick = { regId ->
+                                    navController.navigate(Screen.PendingRegistrationDetails.createRoute(regId))
+                                }
+                            )
+                        }
+
+                        // G.6 Pending Tenant Registration Review & Onboarding Details
+                        composable(route = Screen.PendingRegistrationDetails.route) {
+                            com.example.features.googleform.ui.PendingRegistrationDetailScreen(
+                                viewModel = hiltViewModel(),
+                                onBackClick = { navController.popBackStack() }
+                            )
+                        }
+
                         // H. Rent Ledger Route
                         composable(route = Screen.Rent.route) {
                             com.example.features.rent.ui.screens.RentDashboardScreen(
@@ -331,6 +385,18 @@ class MainActivity : ComponentActivity() {
                                 onNavigateBack = { navController.popBackStack() },
                                 onNavigateToPaymentDetails = { id -> 
                                     navController.navigate(Screen.EditPayment.createRoute(id)) 
+                                },
+                                onNavigateToRecordPayment = {
+                                    navController.navigate(Screen.RecordPayment.route)
+                                },
+                                onNavigate = { route ->
+                                    navController.navigate(route) {
+                                        popUpTo(navController.graph.startDestinationId) {
+                                            saveState = true
+                                        }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
                                 }
                             )
                         }
@@ -359,7 +425,16 @@ class MainActivity : ComponentActivity() {
                                 viewModel = hiltViewModel(),
                                 onBackClick = { navController.popBackStack() },
                                 onExpenseClick = { id -> navController.navigate(Screen.ExpenseDetails.createRoute(id)) },
-                                onAddExpenseClick = { navController.navigate(Screen.AddExpense.route) }
+                                onAddExpenseClick = { navController.navigate(Screen.AddExpense.route) },
+                                onNavigate = { route ->
+                                    navController.navigate(route) {
+                                        popUpTo(navController.graph.startDestinationId) {
+                                            saveState = true
+                                        }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                }
                             )
                         }
 
@@ -492,7 +567,16 @@ class MainActivity : ComponentActivity() {
                                 onNavigateToSync = { navController.navigate(Screen.SyncSettings.route) },
                                 onNavigateToExcelExport = { navController.navigate(Screen.ExcelExport.route) },
                                 onNavigateToExcelImport = { navController.navigate(Screen.ExcelImport.route) },
-                                onNavigateToAbout = { navController.navigate(Screen.AboutSettings.route) }
+                                onNavigateToAbout = { navController.navigate(Screen.AboutSettings.route) },
+                                onNavigate = { route ->
+                                    navController.navigate(route) {
+                                        popUpTo(navController.graph.startDestinationId) {
+                                            saveState = true
+                                        }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                }
                             )
                         }
 
@@ -532,4 +616,5 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+}
 }

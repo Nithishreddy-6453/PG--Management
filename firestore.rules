@@ -54,5 +54,15 @@ service cloud.firestore {
     match /settings/{settingId} {
       allow read, write: if isOwner();
     }
+
+    // Tenant Media Collection (Canonical Profile Photos & Documents)
+    match /tenant_media/{mediaId} {
+      allow read, write: if isOwner();
+    }
+
+    // Drive Folder Mappings Collection
+    match /drive_folder_mappings/{mappingId} {
+      allow read, write: if isOwner();
+    }
   }
 }

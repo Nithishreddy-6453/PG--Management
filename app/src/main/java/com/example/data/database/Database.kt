@@ -67,6 +67,62 @@ data class RoomEntity(
     val ratePerBed: Double = 0.0,
     val roomType: String = "AC",
     val notes: String = "",
+    val isActive: Boolean = true,
+    val ownerId: String = "",
+    val propertyId: String = "property_default",
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
+    val version: Int = 1,
+    val deleted: Boolean = false,
+    val syncStatus: String = "LOCAL_ONLY",
+    val lastSyncedAt: Long = 0L,
+    val lastModifiedByDeviceId: String = ""
+)
+
+@Entity(
+    tableName = "beds",
+    primaryKeys = ["propertyId", "roomNumber", "bedId"],
+    indices = [
+        Index(value = ["ownerId"]),
+        Index(value = ["ownerId", "propertyId"]),
+        Index(value = ["propertyId", "roomNumber"]),
+        Index(value = ["propertyId", "roomNumber", "bedId"])
+    ]
+)
+data class BedEntity(
+    val roomNumber: String,
+    val bedId: String, // e.g., "Bed 1", "Bed 2"
+    val status: String = "AVAILABLE", // AVAILABLE, OCCUPIED, BLOCKED
+    val notes: String = "",
+    val ownerId: String = "",
+    val propertyId: String = "property_default",
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
+    val version: Int = 1,
+    val deleted: Boolean = false,
+    val syncStatus: String = "LOCAL_ONLY",
+    val lastSyncedAt: Long = 0L,
+    val lastModifiedByDeviceId: String = ""
+)
+
+@Entity(
+    tableName = "bed_assignments",
+    indices = [
+        Index(value = ["ownerId"]),
+        Index(value = ["ownerId", "propertyId"]),
+        Index(value = ["propertyId", "roomNumber"]),
+        Index(value = ["propertyId", "tenantId"]),
+        Index(value = ["propertyId", "roomNumber", "bedId"])
+    ]
+)
+data class BedAssignmentEntity(
+    @PrimaryKey val assignmentId: String = java.util.UUID.randomUUID().toString(),
+    val tenantId: Int,
+    val roomNumber: String,
+    val bedId: String,
+    val startDate: String, // yyyy-MM-dd
+    val endDate: String? = null, // null if active
+    val agreedRent: Double,
     val ownerId: String = "",
     val propertyId: String = "property_default",
     val createdAt: Long = System.currentTimeMillis(),
@@ -108,6 +164,7 @@ data class TenantEntity(
     val occupation: String = "",
     val companyOrCollege: String = "",
     val advancePaid: Double = 0.0,
+    val leavingDate: String = "",
     val notes: String = "",
     val ownerId: String = "",
     val propertyId: String = "property_default",
@@ -246,9 +303,132 @@ data class ConflictRecordEntity(
     val createdAt: Long = System.currentTimeMillis()
 )
 
-// ==========================================
-// 2. DATA ACCESS OBJECTS (DAOs)
-// ==========================================
+@Entity(
+    tableName = "tenant_registration_forms",
+    indices = [
+        Index(value = ["propertyId"], unique = true),
+        Index(value = ["ownerId"]),
+        Index(value = ["formId"])
+    ]
+)
+data class TenantRegistrationFormEntity(
+    @PrimaryKey val propertyId: String,
+    val cloudId: String = java.util.UUID.randomUUID().toString(),
+    val ownerId: String = "",
+    val formId: String = "",
+    val formTitle: String = "",
+    val responderUri: String = "",
+    val editUri: String = "",
+    val googleAccountEmail: String = "",
+    val formVersion: Int = 1,
+    val published: Boolean = false,
+    val active: Boolean = true,
+    val questionMapping: String = "{}",
+    val lastCheckedAt: Long = 0L,
+    val lastSuccessfulCheckAt: Long = 0L,
+    val lastError: String? = null,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
+    val deleted: Boolean = false,
+    val syncStatus: String = "LOCAL_ONLY",
+    val lastSyncedAt: Long = 0L,
+    val lastModifiedByDeviceId: String = ""
+)
+
+@Entity(
+    tableName = "pending_tenant_registrations",
+    indices = [
+        Index(value = ["formId", "responseId"], unique = true),
+        Index(value = ["propertyId"]),
+        Index(value = ["ownerId"]),
+        Index(value = ["status"]),
+        Index(value = ["phone"]),
+        Index(value = ["email"]),
+        Index(value = ["cloudId"])
+    ]
+)
+data class PendingTenantRegistrationEntity(
+    @PrimaryKey val cloudId: String = java.util.UUID.randomUUID().toString(),
+    val ownerId: String = "",
+    val propertyId: String = "",
+    val formId: String = "",
+    val responseId: String = "",
+    val submittedAt: Long = System.currentTimeMillis(),
+    val formVersion: Int = 1,
+    val fullName: String = "",
+    val phone: String = "",
+    val email: String = "",
+    val emergencyName: String = "",
+    val emergencyPhone: String = "",
+    val emergencyRelation: String = "",
+    val permanentAddress: String = "",
+    val currentAddress: String = "",
+    val occupation: String = "",
+    val organization: String = "",
+    val expectedJoiningDate: String = "",
+    val notes: String = "",
+    val status: String = "PENDING", // PENDING, NEEDS_REVIEW, DUPLICATE, ACCEPTING, ACCEPTED, REJECTED
+    val createdTenantCloudId: String = "",
+    val reviewedAt: Long = 0L,
+    val reviewedBy: String = "",
+    val rejectionReason: String = "",
+    val duplicateMatchedTenantName: String = "",
+    val duplicateMatchedTenantRoom: String = "",
+    val duplicateMatchedTenantStatus: String = "",
+    val claimedByDeviceId: String = "",
+    val claimedAt: Long = 0L,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
+    val deleted: Boolean = false,
+    val syncStatus: String = "LOCAL_ONLY",
+    val lastSyncedAt: Long = 0L,
+    val lastModifiedByDeviceId: String = ""
+)
+
+@Entity(
+    tableName = "tenant_media",
+    indices = [
+        Index(value = ["tenantCloudId"]),
+        Index(value = ["propertyId"]),
+        Index(value = ["ownerId"]),
+        Index(value = ["mediaType"]),
+        Index(value = ["cloudId"], unique = true)
+    ]
+)
+data class TenantMediaEntity(
+    @PrimaryKey val cloudId: String = java.util.UUID.randomUUID().toString(),
+    val ownerId: String = "",
+    val propertyId: String = "",
+    val tenantCloudId: String = "",
+    val driveFileId: String = "",
+    val driveTenantFolderId: String = "",
+    val drivePhotosFolderId: String = "",
+    val fileName: String = "",
+    val mimeType: String = "image/jpeg",
+    val sizeBytes: Long = 0L,
+    val mediaType: String = "PROFILE_PHOTO", // PROFILE_PHOTO, ID_PROOF
+    val status: String = "ACTIVE", // ACTIVE, DELETED
+    val localFilePath: String = "",
+    val driveFolderId: String = "",
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
+    val deleted: Boolean = false,
+    val syncStatus: String = "LOCAL_ONLY",
+    val lastSyncedAt: Long = 0L,
+    val lastModifiedByDeviceId: String = ""
+)
+
+@Entity(
+    tableName = "drive_folder_mappings",
+    indices = [
+        Index(value = ["folderPathKey"], unique = true)
+    ]
+)
+data class DriveFolderMappingEntity(
+    @PrimaryKey val folderPathKey: String, // e.g. "ROOT", "PROP_prop123", "PROP_prop123_TENANTS", "TENANT_tenant123"
+    val driveFolderId: String,
+    val updatedAt: Long = System.currentTimeMillis()
+)
 
 @Dao
 interface PropertyDao {
@@ -359,6 +539,69 @@ interface RoomDao {
 }
 
 @Dao
+interface BedDao {
+    @Query("SELECT * FROM beds WHERE propertyId = :propertyId AND roomNumber = :roomNumber AND deleted = 0")
+    fun getBedsForRoomFlow(propertyId: String, roomNumber: String): Flow<List<BedEntity>>
+
+    @Query("SELECT * FROM beds WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL))) AND deleted = 0")
+    fun getAllBedsForPropertyFlow(propertyId: String): Flow<List<BedEntity>>
+
+    @Query("SELECT * FROM beds WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL))) AND deleted = 0")
+    suspend fun getAllBedsForProperty(propertyId: String): List<BedEntity>
+
+    @Query("SELECT * FROM beds WHERE propertyId = :propertyId AND roomNumber = :roomNumber AND deleted = 0")
+    suspend fun getBedsForRoom(propertyId: String, roomNumber: String): List<BedEntity>
+
+    @Query("SELECT * FROM beds WHERE propertyId = :propertyId AND roomNumber = :roomNumber AND bedId = :bedId AND deleted = 0 LIMIT 1")
+    suspend fun getBed(propertyId: String, roomNumber: String, bedId: String): BedEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertBed(bed: BedEntity)
+
+    @Update
+    suspend fun updateBed(bed: BedEntity)
+
+    @Query("UPDATE beds SET deleted = 1 WHERE propertyId = :propertyId AND roomNumber = :roomNumber AND bedId = :bedId")
+    suspend fun deleteBed(propertyId: String, roomNumber: String, bedId: String)
+
+    @Query("DELETE FROM beds")
+    suspend fun clearAll()
+}
+
+@Dao
+interface BedAssignmentDao {
+    @Query("SELECT * FROM bed_assignments WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL))) AND deleted = 0")
+    fun getAllAssignmentsFlow(propertyId: String): Flow<List<BedAssignmentEntity>>
+
+    @Query("SELECT * FROM bed_assignments WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL))) AND deleted = 0")
+    suspend fun getAllAssignments(propertyId: String): List<BedAssignmentEntity>
+
+    @Query("SELECT * FROM bed_assignments WHERE propertyId = :propertyId AND roomNumber = :roomNumber AND deleted = 0")
+    fun getAssignmentsForRoomFlow(propertyId: String, roomNumber: String): Flow<List<BedAssignmentEntity>>
+
+    @Query("SELECT * FROM bed_assignments WHERE propertyId = :propertyId AND roomNumber = :roomNumber AND deleted = 0")
+    suspend fun getAssignmentsForRoom(propertyId: String, roomNumber: String): List<BedAssignmentEntity>
+
+    @Query("SELECT * FROM bed_assignments WHERE propertyId = :propertyId AND tenantId = :tenantId AND deleted = 0")
+    suspend fun getAssignmentsForTenant(propertyId: String, tenantId: Int): List<BedAssignmentEntity>
+
+    @Query("SELECT * FROM bed_assignments WHERE propertyId = :propertyId AND roomNumber = :roomNumber AND bedId = :bedId AND endDate IS NULL AND deleted = 0 LIMIT 1")
+    suspend fun getActiveAssignmentForBed(propertyId: String, roomNumber: String, bedId: String): BedAssignmentEntity?
+
+    @Query("SELECT * FROM bed_assignments WHERE propertyId = :propertyId AND tenantId = :tenantId AND endDate IS NULL AND deleted = 0 LIMIT 1")
+    suspend fun getActiveAssignmentForTenant(propertyId: String, tenantId: Int): BedAssignmentEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAssignment(assignment: BedAssignmentEntity)
+
+    @Update
+    suspend fun updateAssignment(assignment: BedAssignmentEntity)
+
+    @Query("DELETE FROM bed_assignments")
+    suspend fun clearAll()
+}
+
+@Dao
 interface TenantDao {
     @Query("SELECT * FROM tenants WHERE (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL)) OR (:propertyId = '' AND (propertyId = 'property_default' OR propertyId IS NULL))) AND deleted = 0 ORDER BY name ASC")
     fun getAllTenantsForPropertyFlow(propertyId: String): Flow<List<TenantEntity>>
@@ -446,6 +689,12 @@ interface RentPaymentDao {
 
     @Query("SELECT * FROM payments WHERE deleted = 0 AND (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL)) OR (:propertyId = '' AND (propertyId = 'property_default' OR propertyId IS NULL))) AND LOWER(TRIM(tenantName)) = LOWER(TRIM(:tenantName)) AND LOWER(TRIM(billingMonth)) = LOWER(TRIM(:billingMonth)) LIMIT 1")
     suspend fun getPaymentForTenantNamePropertyAndMonth(tenantName: String, propertyId: String, billingMonth: String): RentPaymentEntity?
+
+    @Query("SELECT * FROM payments WHERE deleted = 0 AND (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL)) OR (:propertyId = '' AND (propertyId = 'property_default' OR propertyId IS NULL))) AND LOWER(TRIM(billingMonth)) = LOWER(TRIM(:billingMonth)) ORDER BY tenantName ASC")
+    suspend fun getPaymentsForPropertyAndMonth(propertyId: String, billingMonth: String): List<RentPaymentEntity>
+
+    @Query("SELECT * FROM payments WHERE deleted = 0 AND (propertyId = :propertyId OR (:propertyId = 'property_default' AND (propertyId = '' OR propertyId IS NULL)) OR (:propertyId = '' AND (propertyId = 'property_default' OR propertyId IS NULL))) AND LOWER(TRIM(billingMonth)) = LOWER(TRIM(:billingMonth)) ORDER BY tenantName ASC")
+    fun getPaymentsForPropertyAndMonthFlow(propertyId: String, billingMonth: String): Flow<List<RentPaymentEntity>>
 
     @Query("SELECT * FROM payments WHERE id = :id")
     suspend fun getPaymentByIdIncludingDeleted(id: Int): RentPaymentEntity?
@@ -598,6 +847,140 @@ interface ConflictRecordDao {
     suspend fun deleteConflictsForEntity(entityType: String, entityId: String)
 
     @Query("DELETE FROM conflict_records")
+    suspend fun clearAll()
+}
+
+@Dao
+interface TenantRegistrationFormDao {
+    @Query("SELECT * FROM tenant_registration_forms WHERE propertyId = :propertyId AND deleted = 0 LIMIT 1")
+    fun getFormForPropertyFlow(propertyId: String): Flow<TenantRegistrationFormEntity?>
+
+    @Query("SELECT * FROM tenant_registration_forms WHERE propertyId = :propertyId AND deleted = 0 LIMIT 1")
+    suspend fun getFormForProperty(propertyId: String): TenantRegistrationFormEntity?
+
+    @Query("SELECT * FROM tenant_registration_forms WHERE formId = :formId AND deleted = 0 LIMIT 1")
+    suspend fun getFormByFormId(formId: String): TenantRegistrationFormEntity?
+
+    @Query("SELECT * FROM tenant_registration_forms WHERE deleted = 0")
+    fun getAllFormsFlow(): Flow<List<TenantRegistrationFormEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdateForm(form: TenantRegistrationFormEntity)
+
+    @Query("UPDATE tenant_registration_forms SET active = :active, lastCheckedAt = :lastCheckedAt, lastError = :lastError, updatedAt = :updatedAt WHERE propertyId = :propertyId")
+    suspend fun updateFormStatus(propertyId: String, active: Boolean, lastCheckedAt: Long, lastError: String?, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE tenant_registration_forms SET deleted = 1, active = 0, updatedAt = :updatedAt WHERE propertyId = :propertyId")
+    suspend fun softDeleteForm(propertyId: String, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("DELETE FROM tenant_registration_forms WHERE propertyId = :propertyId")
+    suspend fun deleteForm(propertyId: String)
+
+    @Query("DELETE FROM tenant_registration_forms")
+    suspend fun clearAll()
+}
+
+@Dao
+interface PendingTenantRegistrationDao {
+    @Query("SELECT * FROM pending_tenant_registrations WHERE propertyId = :propertyId AND deleted = 0 ORDER BY submittedAt DESC")
+    fun getRegistrationsForPropertyFlow(propertyId: String): Flow<List<PendingTenantRegistrationEntity>>
+
+    @Query("SELECT * FROM pending_tenant_registrations WHERE propertyId = :propertyId AND status = :status AND deleted = 0 ORDER BY submittedAt DESC")
+    fun getRegistrationsByStatusFlow(propertyId: String, status: String): Flow<List<PendingTenantRegistrationEntity>>
+
+    @Query("SELECT * FROM pending_tenant_registrations WHERE cloudId = :cloudId LIMIT 1")
+    fun getRegistrationByCloudIdFlow(cloudId: String): Flow<PendingTenantRegistrationEntity?>
+
+    @Query("SELECT * FROM pending_tenant_registrations WHERE cloudId = :cloudId LIMIT 1")
+    suspend fun getRegistrationByCloudId(cloudId: String): PendingTenantRegistrationEntity?
+
+    @Query("SELECT * FROM pending_tenant_registrations WHERE formId = :formId AND responseId = :responseId LIMIT 1")
+    suspend fun getRegistrationByResponseId(formId: String, responseId: String): PendingTenantRegistrationEntity?
+
+    @Query("SELECT * FROM pending_tenant_registrations WHERE propertyId = :propertyId AND deleted = 0")
+    suspend fun getAllForProperty(propertyId: String): List<PendingTenantRegistrationEntity>
+
+    @Query("SELECT COUNT(*) FROM pending_tenant_registrations WHERE propertyId = :propertyId AND status IN ('PENDING', 'NEEDS_REVIEW', 'DUPLICATE') AND deleted = 0")
+    fun getPendingCountFlow(propertyId: String): Flow<Int>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertRegistration(entity: PendingTenantRegistrationEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdate(entity: PendingTenantRegistrationEntity)
+
+    @Update
+    suspend fun update(entity: PendingTenantRegistrationEntity)
+
+    @Query("UPDATE pending_tenant_registrations SET status = :status, reviewedAt = :reviewedAt, reviewedBy = :reviewedBy, rejectionReason = :rejectionReason, createdTenantCloudId = :tenantCloudId, updatedAt = :updatedAt WHERE cloudId = :cloudId")
+    suspend fun updateReviewStatus(
+        cloudId: String,
+        status: String,
+        reviewedAt: Long,
+        reviewedBy: String,
+        rejectionReason: String,
+        tenantCloudId: String,
+        updatedAt: Long = System.currentTimeMillis()
+    )
+
+    @Query("UPDATE pending_tenant_registrations SET status = 'ACCEPTING', claimedByDeviceId = :deviceId, claimedAt = :claimedAt, updatedAt = :claimedAt WHERE cloudId = :cloudId AND status != 'ACCEPTED'")
+    suspend fun claimForAcceptance(cloudId: String, deviceId: String, claimedAt: Long): Int
+
+    @Query("UPDATE pending_tenant_registrations SET status = :status, claimedByDeviceId = '', claimedAt = 0, updatedAt = :updatedAt WHERE cloudId = :cloudId")
+    suspend fun releaseClaim(cloudId: String, status: String, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE pending_tenant_registrations SET deleted = 1, updatedAt = :updatedAt WHERE cloudId = :cloudId")
+    suspend fun softDelete(cloudId: String, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("DELETE FROM pending_tenant_registrations")
+    suspend fun clearAll()
+}
+
+@Dao
+interface TenantMediaDao {
+    @Query("SELECT * FROM tenant_media WHERE tenantCloudId = :tenantCloudId AND mediaType = 'PROFILE_PHOTO' AND deleted = 0 AND status = 'ACTIVE' ORDER BY updatedAt DESC LIMIT 1")
+    fun getProfilePhotoFlow(tenantCloudId: String): Flow<TenantMediaEntity?>
+
+    @Query("SELECT * FROM tenant_media WHERE tenantCloudId = :tenantCloudId AND mediaType = 'PROFILE_PHOTO' AND deleted = 0 AND status = 'ACTIVE' ORDER BY updatedAt DESC LIMIT 1")
+    suspend fun getProfilePhoto(tenantCloudId: String): TenantMediaEntity?
+
+    @Query("SELECT * FROM tenant_media WHERE tenantCloudId = :tenantCloudId AND deleted = 0 ORDER BY createdAt DESC")
+    fun getAllMediaForTenantFlow(tenantCloudId: String): Flow<List<TenantMediaEntity>>
+
+    @Query("SELECT * FROM tenant_media WHERE cloudId = :cloudId LIMIT 1")
+    suspend fun getMediaByCloudId(cloudId: String): TenantMediaEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdate(entity: TenantMediaEntity)
+
+    @Update
+    suspend fun update(entity: TenantMediaEntity)
+
+    @Query("UPDATE tenant_media SET deleted = 1, status = 'DELETED', updatedAt = :updatedAt WHERE tenantCloudId = :tenantCloudId AND mediaType = :mediaType")
+    suspend fun softDeleteTenantMediaByType(tenantCloudId: String, mediaType: String = "PROFILE_PHOTO", updatedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE tenant_media SET deleted = 1, status = 'DELETED', updatedAt = :updatedAt WHERE cloudId = :cloudId")
+    suspend fun softDelete(cloudId: String, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE tenant_media SET localFilePath = :localFilePath, updatedAt = :updatedAt WHERE cloudId = :cloudId")
+    suspend fun updateLocalFilePath(cloudId: String, localFilePath: String, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("DELETE FROM tenant_media WHERE tenantCloudId = :tenantCloudId AND mediaType = 'PROFILE_PHOTO' AND cloudId != :canonicalCloudId")
+    suspend fun deleteNonCanonicalProfilePhotos(tenantCloudId: String, canonicalCloudId: String)
+
+    @Query("DELETE FROM tenant_media")
+    suspend fun clearAll()
+}
+
+@Dao
+interface DriveFolderDao {
+    @Query("SELECT * FROM drive_folder_mappings WHERE folderPathKey = :key LIMIT 1")
+    suspend fun getFolderMapping(key: String): DriveFolderMappingEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertFolderMapping(entity: DriveFolderMappingEntity)
+
+    @Query("DELETE FROM drive_folder_mappings")
     suspend fun clearAll()
 }
 
@@ -793,6 +1176,223 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
         db.execSQL("CREATE INDEX IF NOT EXISTS index_expenses_cloudId ON expenses(cloudId)")
     }
 }
+val MIGRATION_9_10 = object : Migration(9, 10) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        addColumnIfNotExists(db, "tenants", "leavingDate", "TEXT NOT NULL DEFAULT ''")
+    }
+}
+val MIGRATION_10_11 = object : Migration(10, 11) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `tenant_registration_forms` (
+                `propertyId` TEXT NOT NULL,
+                `cloudId` TEXT NOT NULL,
+                `ownerId` TEXT NOT NULL,
+                `formId` TEXT NOT NULL,
+                `formTitle` TEXT NOT NULL,
+                `responderUri` TEXT NOT NULL,
+                `editUri` TEXT NOT NULL,
+                `googleAccountEmail` TEXT NOT NULL,
+                `formVersion` INTEGER NOT NULL,
+                `published` INTEGER NOT NULL,
+                `active` INTEGER NOT NULL,
+                `questionMapping` TEXT NOT NULL,
+                `lastCheckedAt` INTEGER NOT NULL,
+                `lastSuccessfulCheckAt` INTEGER NOT NULL,
+                `lastError` TEXT,
+                `createdAt` INTEGER NOT NULL,
+                `updatedAt` INTEGER NOT NULL,
+                `deleted` INTEGER NOT NULL,
+                `syncStatus` TEXT NOT NULL,
+                `lastSyncedAt` INTEGER NOT NULL,
+                `lastModifiedByDeviceId` TEXT NOT NULL,
+                PRIMARY KEY(`propertyId`)
+            )
+        """.trimIndent())
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_tenant_registration_forms_propertyId` ON `tenant_registration_forms` (`propertyId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_tenant_registration_forms_ownerId` ON `tenant_registration_forms` (`ownerId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_tenant_registration_forms_formId` ON `tenant_registration_forms` (`formId`)")
+    }
+}
+
+val MIGRATION_11_12 = object : Migration(11, 12) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `pending_tenant_registrations` (
+                `cloudId` TEXT NOT NULL,
+                `ownerId` TEXT NOT NULL,
+                `propertyId` TEXT NOT NULL,
+                `formId` TEXT NOT NULL,
+                `responseId` TEXT NOT NULL,
+                `submittedAt` INTEGER NOT NULL,
+                `formVersion` INTEGER NOT NULL,
+                `fullName` TEXT NOT NULL,
+                `phone` TEXT NOT NULL,
+                `email` TEXT NOT NULL,
+                `emergencyName` TEXT NOT NULL,
+                `emergencyPhone` TEXT NOT NULL,
+                `emergencyRelation` TEXT NOT NULL,
+                `permanentAddress` TEXT NOT NULL,
+                `currentAddress` TEXT NOT NULL,
+                `occupation` TEXT NOT NULL,
+                `organization` TEXT NOT NULL,
+                `expectedJoiningDate` TEXT NOT NULL,
+                `notes` TEXT NOT NULL,
+                `status` TEXT NOT NULL,
+                `createdTenantCloudId` TEXT NOT NULL,
+                `reviewedAt` INTEGER NOT NULL,
+                `reviewedBy` TEXT NOT NULL,
+                `rejectionReason` TEXT NOT NULL,
+                `duplicateMatchedTenantName` TEXT NOT NULL,
+                `duplicateMatchedTenantRoom` TEXT NOT NULL,
+                `duplicateMatchedTenantStatus` TEXT NOT NULL,
+                `claimedByDeviceId` TEXT NOT NULL,
+                `claimedAt` INTEGER NOT NULL,
+                `createdAt` INTEGER NOT NULL,
+                `updatedAt` INTEGER NOT NULL,
+                `deleted` INTEGER NOT NULL,
+                `syncStatus` TEXT NOT NULL,
+                `lastSyncedAt` INTEGER NOT NULL,
+                `lastModifiedByDeviceId` TEXT NOT NULL,
+                PRIMARY KEY(`cloudId`)
+            )
+        """.trimIndent())
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_pending_tenant_registrations_formId_responseId` ON `pending_tenant_registrations` (`formId`, `responseId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_pending_tenant_registrations_propertyId` ON `pending_tenant_registrations` (`propertyId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_pending_tenant_registrations_ownerId` ON `pending_tenant_registrations` (`ownerId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_pending_tenant_registrations_status` ON `pending_tenant_registrations` (`status`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_pending_tenant_registrations_phone` ON `pending_tenant_registrations` (`phone`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_pending_tenant_registrations_email` ON `pending_tenant_registrations` (`email`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_pending_tenant_registrations_cloudId` ON `pending_tenant_registrations` (`cloudId`)")
+    }
+}
+
+val MIGRATION_12_13 = object : Migration(12, 13) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `tenant_media` (
+                `cloudId` TEXT NOT NULL,
+                `ownerId` TEXT NOT NULL,
+                `propertyId` TEXT NOT NULL,
+                `tenantCloudId` TEXT NOT NULL,
+                `driveFileId` TEXT NOT NULL,
+                `fileName` TEXT NOT NULL,
+                `mimeType` TEXT NOT NULL,
+                `sizeBytes` INTEGER NOT NULL,
+                `mediaType` TEXT NOT NULL,
+                `status` TEXT NOT NULL,
+                `localFilePath` TEXT NOT NULL,
+                `driveFolderId` TEXT NOT NULL,
+                `createdAt` INTEGER NOT NULL,
+                `updatedAt` INTEGER NOT NULL,
+                `deleted` INTEGER NOT NULL,
+                `syncStatus` TEXT NOT NULL,
+                `lastSyncedAt` INTEGER NOT NULL,
+                `lastModifiedByDeviceId` TEXT NOT NULL,
+                PRIMARY KEY(`cloudId`)
+            )
+        """.trimIndent())
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_tenant_media_cloudId` ON `tenant_media` (`cloudId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_tenant_media_tenantCloudId` ON `tenant_media` (`tenantCloudId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_tenant_media_propertyId` ON `tenant_media` (`propertyId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_tenant_media_ownerId` ON `tenant_media` (`ownerId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_tenant_media_mediaType` ON `tenant_media` (`mediaType`)")
+
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `drive_folder_mappings` (
+                `folderPathKey` TEXT NOT NULL,
+                `driveFolderId` TEXT NOT NULL,
+                `updatedAt` INTEGER NOT NULL,
+                PRIMARY KEY(`folderPathKey`)
+            )
+        """.trimIndent())
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_drive_folder_mappings_folderPathKey` ON `drive_folder_mappings` (`folderPathKey`)")
+    }
+}
+
+val MIGRATION_13_14 = object : Migration(13, 14) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        addColumnIfNotExists(db, "tenant_media", "driveTenantFolderId", "TEXT NOT NULL DEFAULT ''")
+        addColumnIfNotExists(db, "tenant_media", "drivePhotosFolderId", "TEXT NOT NULL DEFAULT ''")
+    }
+}
+
+val MIGRATION_14_15 = object : Migration(14, 15) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        addColumnIfNotExists(db, "rooms", "isActive", "INTEGER NOT NULL DEFAULT 1")
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS beds (
+                roomNumber TEXT NOT NULL,
+                bedId TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'AVAILABLE',
+                notes TEXT NOT NULL DEFAULT '',
+                ownerId TEXT NOT NULL DEFAULT '',
+                propertyId TEXT NOT NULL DEFAULT 'property_default',
+                createdAt INTEGER NOT NULL DEFAULT 0,
+                updatedAt INTEGER NOT NULL DEFAULT 0,
+                version INTEGER NOT NULL DEFAULT 1,
+                deleted INTEGER NOT NULL DEFAULT 0,
+                syncStatus TEXT NOT NULL DEFAULT 'LOCAL_ONLY',
+                lastSyncedAt INTEGER NOT NULL DEFAULT 0,
+                lastModifiedByDeviceId TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY(propertyId, roomNumber, bedId)
+            )
+        """)
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS bed_assignments (
+                assignmentId TEXT NOT NULL PRIMARY KEY,
+                tenantId INTEGER NOT NULL,
+                roomNumber TEXT NOT NULL,
+                bedId TEXT NOT NULL,
+                startDate TEXT NOT NULL,
+                endDate TEXT,
+                agreedRent REAL NOT NULL,
+                ownerId TEXT NOT NULL DEFAULT '',
+                propertyId TEXT NOT NULL DEFAULT 'property_default',
+                createdAt INTEGER NOT NULL DEFAULT 0,
+                updatedAt INTEGER NOT NULL DEFAULT 0,
+                version INTEGER NOT NULL DEFAULT 1,
+                deleted INTEGER NOT NULL DEFAULT 0,
+                syncStatus TEXT NOT NULL DEFAULT 'LOCAL_ONLY',
+                lastSyncedAt INTEGER NOT NULL DEFAULT 0,
+                lastModifiedByDeviceId TEXT NOT NULL DEFAULT ''
+            )
+        """)
+        val cursor = db.query("SELECT propertyId, roomNumber, capacity FROM rooms WHERE deleted = 0")
+        while (cursor.moveToNext()) {
+            val propertyId = cursor.getString(0) ?: "property_default"
+            val roomNumber = cursor.getString(1)
+            val capacity = cursor.getInt(2)
+            for (i in 1..capacity) {
+                val bedId = "Bed $i"
+                db.execSQL("""
+                    INSERT OR IGNORE INTO beds (roomNumber, bedId, status, propertyId)
+                    VALUES ('$roomNumber', '$bedId', 'AVAILABLE', '$propertyId')
+                """)
+            }
+        }
+        cursor.close()
+
+        val tenantCursor = db.query("SELECT id, propertyId, roomNumber, bedId, monthlyRent, moveInDate FROM tenants WHERE deleted = 0 AND roomNumber IS NOT NULL AND roomNumber != ''")
+        while (tenantCursor.moveToNext()) {
+            val tenantId = tenantCursor.getInt(0)
+            val propertyId = tenantCursor.getString(1) ?: "property_default"
+            val roomNumber = tenantCursor.getString(2)
+            val bedId = tenantCursor.getString(3).ifBlank { "Bed 1" }
+            val agreedRent = tenantCursor.getDouble(4)
+            val moveInDate = tenantCursor.getString(5).ifBlank { "2026-01-01" }
+            val assignmentId = java.util.UUID.randomUUID().toString()
+            db.execSQL("""
+                INSERT OR IGNORE INTO bed_assignments (assignmentId, tenantId, roomNumber, bedId, startDate, endDate, agreedRent, propertyId)
+                VALUES ('$assignmentId', $tenantId, '$roomNumber', '$bedId', '$moveInDate', NULL, $agreedRent, '$propertyId')
+            """)
+            db.execSQL("""
+                UPDATE beds SET status = 'OCCUPIED' WHERE propertyId = '$propertyId' AND roomNumber = '$roomNumber' AND bedId = '$bedId'
+            """)
+        }
+        tenantCursor.close()
+    }
+}
 
 @Database(
     entities = [
@@ -803,9 +1403,15 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
         ExpenseEntity::class,
         OwnerProfileEntity::class,
         SyncOperationEntity::class,
-        ConflictRecordEntity::class
+        ConflictRecordEntity::class,
+        TenantRegistrationFormEntity::class,
+        PendingTenantRegistrationEntity::class,
+        TenantMediaEntity::class,
+        DriveFolderMappingEntity::class,
+        BedEntity::class,
+        BedAssignmentEntity::class
     ],
-    version = 9,
+    version = 15,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -817,6 +1423,12 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun ownerProfileDao(): OwnerProfileDao
     abstract fun syncQueueDao(): SyncQueueDao
     abstract fun conflictRecordDao(): ConflictRecordDao
+    abstract fun tenantRegistrationFormDao(): TenantRegistrationFormDao
+    abstract fun pendingTenantRegistrationDao(): PendingTenantRegistrationDao
+    abstract fun tenantMediaDao(): TenantMediaDao
+    abstract fun driveFolderDao(): DriveFolderDao
+    abstract fun bedDao(): BedDao
+    abstract fun bedAssignmentDao(): BedAssignmentDao
 
     suspend fun clearAllUserData() {
         propertyDao().clearAll()
@@ -827,6 +1439,12 @@ abstract class AppDatabase : RoomDatabase() {
         ownerProfileDao().clearAll()
         syncQueueDao().clearAll()
         conflictRecordDao().clearAll()
+        tenantRegistrationFormDao().clearAll()
+        pendingTenantRegistrationDao().clearAll()
+        tenantMediaDao().clearAll()
+        driveFolderDao().clearAll()
+        bedDao().clearAll()
+        bedAssignmentDao().clearAll()
     }
 
     companion object {
@@ -849,7 +1467,13 @@ abstract class AppDatabase : RoomDatabase() {
                     MIGRATION_6_8,
                     MIGRATION_7_8,
                     MIGRATION_6_7,
-                    MIGRATION_8_9
+                    MIGRATION_8_9,
+                    MIGRATION_9_10,
+                    MIGRATION_10_11,
+                    MIGRATION_11_12,
+                    MIGRATION_12_13,
+                    MIGRATION_13_14,
+                    MIGRATION_14_15
                 )
                 .fallbackToDestructiveMigration(dropAllTables = true)
                 .addCallback(DatabaseCallback(context))

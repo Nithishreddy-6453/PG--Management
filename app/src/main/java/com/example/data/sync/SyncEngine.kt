@@ -22,6 +22,8 @@ import com.example.data.database.SyncOperationEntity
 import com.example.data.database.SyncQueueDao
 import com.example.data.database.TenantDao
 import com.example.data.database.TenantEntity
+import com.example.data.database.TenantMediaDao
+import com.example.data.database.TenantMediaEntity
 import com.example.data.firestore.mapper.toDto
 import com.example.data.firestore.mapper.toEntity
 import com.example.data.firestore.mapper.toOwnerProfileEntity
@@ -31,11 +33,13 @@ import com.example.data.firestore.model.PaymentDto
 import com.example.data.firestore.model.PropertyDto
 import com.example.data.firestore.model.RoomDto
 import com.example.data.firestore.model.TenantDto
+import com.example.data.firestore.model.TenantMediaDto
 import com.example.data.firestore.repository.FirestoreExpenseRepository
 import com.example.data.firestore.repository.FirestorePaymentRepository
 import com.example.data.firestore.repository.FirestorePropertyRepository
 import com.example.data.firestore.repository.FirestoreRoomRepository
 import com.example.data.firestore.repository.FirestoreSettingsRepository
+import com.example.data.firestore.repository.FirestoreTenantMediaRepository
 import com.example.data.firestore.repository.FirestoreTenantRepository
 import com.example.data.firestore.repository.FirestoreUserRepository
 import com.example.features.properties.data.CurrentPropertyManager
@@ -66,6 +70,8 @@ class SyncEngine @Inject constructor(
     private val firestorePropertyRepository: FirestorePropertyRepository,
     private val firestoreSettingsRepository: FirestoreSettingsRepository,
     private val firestoreUserRepository: FirestoreUserRepository,
+    private val tenantMediaDao: TenantMediaDao,
+    private val firestoreTenantMediaRepository: FirestoreTenantMediaRepository,
     private val currentPropertyManager: CurrentPropertyManager,
     private val auth: FirebaseAuth,
     private val conflictResolver: ConflictResolver,
@@ -319,6 +325,33 @@ class SyncEngine @Inject constructor(
                 }
             }
 
+            // 7.5. Download and insert Tenant Media Metadata (Profile Photos etc.)
+            when (val mediaRes = firestoreTenantMediaRepository.getAllTenantMedia(ownerId, includeDeleted = true)) {
+                is PgResult.Success -> {
+                    val mediaList = mediaRes.data
+                    logger.i(TAG, "Bootstrap: Restoring ${mediaList.size} tenant media records from cloud")
+                    for (dto in mediaList) {
+                        val canonicalCloudId = if (dto.cloudId.isNotBlank()) dto.cloudId else "${dto.tenantCloudId}_PROFILE_PHOTO"
+                        val existing = tenantMediaDao.getMediaByCloudId(canonicalCloudId)
+                            ?: if (dto.tenantCloudId.isNotBlank()) tenantMediaDao.getProfilePhoto(dto.tenantCloudId) else null
+                        val keepLocal = if (existing != null && existing.localFilePath.isNotBlank() && java.io.File(existing.localFilePath).exists() && existing.driveFileId == dto.driveFileId) {
+                            existing.localFilePath
+                        } else ""
+                        if (dto.tenantCloudId.isNotBlank() && dto.mediaType == "PROFILE_PHOTO") {
+                            tenantMediaDao.deleteNonCanonicalProfilePhotos(dto.tenantCloudId, canonicalCloudId)
+                        }
+                        tenantMediaDao.insertOrUpdate(
+                            dto.toEntity(localFilePath = keepLocal).copy(
+                                cloudId = canonicalCloudId,
+                                syncStatus = "SYNCED",
+                                lastSyncedAt = System.currentTimeMillis()
+                            )
+                        )
+                    }
+                }
+                is PgResult.Failure -> logger.w(TAG, "Bootstrap: Failed downloading tenant media: ${mediaRes.error.message}")
+            }
+
             // 8. Wipe any leftover pending upload queue items from pre-login state
             syncQueueDao.clearAll()
 
@@ -392,6 +425,7 @@ class SyncEngine @Inject constructor(
                     "EXPENSE" -> processExpenseUpload(op, ownerId)
                     "PROPERTY" -> processPropertyUpload(op, ownerId)
                     "PROFILE" -> processProfileUpload(op, ownerId)
+                    "MEDIA" -> processMediaUpload(op, ownerId)
                     else -> logger.w(TAG, "Unknown entity type in sync queue: ${op.entityType}")
                 }
             } catch (e: Exception) {
@@ -723,6 +757,39 @@ class SyncEngine @Inject constructor(
         }
     }
 
+    private suspend fun processMediaUpload(op: SyncOperationEntity, ownerId: String) {
+        val media = tenantMediaDao.getMediaByCloudId(op.entityId)
+        if (media == null) {
+            syncQueueDao.deleteOperation(op.id)
+            return
+        }
+
+        if (op.operationType == "DELETE" || media.deleted) {
+            when (val res = firestoreTenantMediaRepository.deleteMediaMetadata(media.cloudId)) {
+                is PgResult.Success -> {
+                    syncQueueDao.deleteOperation(op.id)
+                    syncQueueDao.deleteByEntity("MEDIA", media.cloudId)
+                }
+                is PgResult.Failure -> throw Exception("Failed to delete media in Firestore: ${res.error.message}")
+            }
+        } else {
+            val dto = media.toDto()
+            when (val res = firestoreTenantMediaRepository.saveMediaMetadata(dto)) {
+                is PgResult.Success -> {
+                    tenantMediaDao.insertOrUpdate(
+                        media.copy(
+                            syncStatus = "SYNCED",
+                            lastSyncedAt = System.currentTimeMillis()
+                        )
+                    )
+                    syncQueueDao.deleteOperation(op.id)
+                    syncQueueDao.deleteByEntity("MEDIA", media.cloudId)
+                }
+                is PgResult.Failure -> throw Exception("Failed to upload media metadata to Firestore: ${res.error.message}")
+            }
+        }
+    }
+
     private suspend fun downloadRemoteChanges(ownerId: String) {
         logger.i(TAG, "Downloading remote changes for user: $ownerId")
 
@@ -774,6 +841,12 @@ class SyncEngine @Inject constructor(
                 }
             }
             is PgResult.Failure -> logger.w(TAG, "Could not fetch property profile: ${propertyResult.error.message}")
+        }
+
+        // 6. Sync Tenant Media Metadata (Profile Photos etc.)
+        when (val mediaResult = firestoreTenantMediaRepository.getAllTenantMedia(ownerId, includeDeleted = true)) {
+            is PgResult.Success -> reconcileRemoteTenantMedia(mediaResult.data, ownerId)
+            is PgResult.Failure -> logger.w(TAG, "Could not fetch remote tenant media: ${mediaResult.error.message}")
         }
     }
 
@@ -1358,6 +1431,44 @@ class SyncEngine @Inject constructor(
                         expenseDao.updateExpense(local.copy(syncStatus = "CONFLICT"))
                     }
                     is ConflictResult.UseLocal -> { /* Retain local */ }
+                }
+            }
+        }
+    }
+
+    suspend fun reconcileRemoteTenantMedia(mediaList: List<TenantMediaDto>, ownerId: String) {
+        database.withTransaction {
+            for (remoteDto in mediaList) {
+                if (remoteDto.ownerId.isNotBlank() && remoteDto.ownerId != ownerId) continue
+                val canonicalCloudId = if (remoteDto.cloudId.isNotBlank()) remoteDto.cloudId else "${remoteDto.tenantCloudId}_PROFILE_PHOTO"
+                val local = tenantMediaDao.getMediaByCloudId(canonicalCloudId)
+                    ?: if (remoteDto.tenantCloudId.isNotBlank()) tenantMediaDao.getProfilePhoto(remoteDto.tenantCloudId) else null
+                if (remoteDto.tenantCloudId.isNotBlank() && remoteDto.mediaType == "PROFILE_PHOTO") {
+                    tenantMediaDao.deleteNonCanonicalProfilePhotos(remoteDto.tenantCloudId, canonicalCloudId)
+                }
+                if (local == null) {
+                    tenantMediaDao.insertOrUpdate(
+                        remoteDto.toEntity(localFilePath = "").copy(
+                            cloudId = canonicalCloudId,
+                            syncStatus = "SYNCED",
+                            lastSyncedAt = System.currentTimeMillis()
+                        )
+                    )
+                } else {
+                    if (remoteDto.updatedAt >= local.updatedAt) {
+                        val keepLocal = if (local.localFilePath.isNotBlank() && 
+                                           java.io.File(local.localFilePath).exists() && 
+                                           local.driveFileId == remoteDto.driveFileId) {
+                            local.localFilePath
+                        } else ""
+                        tenantMediaDao.insertOrUpdate(
+                            remoteDto.toEntity(localFilePath = keepLocal).copy(
+                                cloudId = canonicalCloudId,
+                                syncStatus = "SYNCED",
+                                lastSyncedAt = System.currentTimeMillis()
+                            )
+                        )
+                    }
                 }
             }
         }

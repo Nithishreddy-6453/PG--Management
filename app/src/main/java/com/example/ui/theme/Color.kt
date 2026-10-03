@@ -2,22 +2,29 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val PremiumBackground = Color(0xFFFAFAFA)
+val PremiumBackground = Color(0xFFF7F9FC)
 val PremiumSurface = Color(0xFFFFFFFF)
-val PremiumSurfaceVariant = Color(0xFFF5F5F5)
+val PremiumSurfaceVariant = Color(0xFFF1F5F9)
 
-val MaterialBlue = Color(0xFF1A73E8)
-val MaterialBlueContainer = Color(0xFFD2E3FC)
-val OnMaterialBlueContainer = Color(0xFF174EA6)
+val MaterialBlue = Color(0xFF1769D1)
+val MaterialBlueContainer = Color(0xFFEAF2FF)
+val OnMaterialBlueContainer = Color(0xFF1769D1)
 
-val EmeraldGreen = Color(0xFF0D652D)
-val EmeraldGreenContainer = Color(0xFFCEEAD6)
-val OnEmeraldGreenContainer = Color(0xFF0D652D)
+val EmeraldGreen = Color(0xFF16803C)
+val EmeraldGreenContainer = Color(0xFFE8F7EE)
+val OnEmeraldGreenContainer = Color(0xFF16803C)
 
-val PremiumError = Color(0xFFD93025)
-val PremiumErrorContainer = Color(0xFFFCE8E6)
-val OnPremiumErrorContainer = Color(0xFFB31412)
+val WarningAmber = Color(0xFFB86B00)
+val WarningAmberContainer = Color(0xFFFFF4D9)
 
-val TextPrimary = Color(0xFF202124)
-val TextSecondary = Color(0xFF5F6368)
-val OutlineVariant = Color(0xFFDADCE0)
+val SecondaryPurple = Color(0xFF6D28D9)
+val SecondaryPurpleContainer = Color(0xFFF1EAFE)
+
+val PremiumError = Color(0xFFC62828)
+val PremiumErrorContainer = Color(0xFFFDEAEA)
+val OnPremiumErrorContainer = Color(0xFFC62828)
+
+val TextPrimary = Color(0xFF172033)
+val TextSecondary = Color(0xFF52627A)
+val OutlineVariant = Color(0xFFE2E8F0)
+

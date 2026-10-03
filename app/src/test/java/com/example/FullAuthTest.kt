@@ -34,7 +34,17 @@ class FullAuthTest {
         val context = ApplicationProvider.getApplicationContext<Application>()
         db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).allowMainThreadQueries().build()
         val currentPropertyManager = com.example.features.properties.data.CurrentPropertyManager(context, db.propertyDao())
-        repo = PgRepository(db.roomDao(), db.tenantDao(), db.rentPaymentDao(), db.expenseDao(), db.ownerProfileDao(), db.propertyDao(), currentPropertyManager)
+        repo = PgRepository(
+            db.roomDao(),
+            db.tenantDao(),
+            db.rentPaymentDao(),
+            db.expenseDao(),
+            db.bedDao(),
+            db.bedAssignmentDao(),
+            db.ownerProfileDao(),
+            db.propertyDao(),
+            currentPropertyManager
+        )
         viewModel = PgViewModel(context, repo)
     }
 

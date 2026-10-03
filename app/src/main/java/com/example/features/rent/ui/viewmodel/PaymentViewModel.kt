@@ -124,19 +124,14 @@ class PaymentViewModel @Inject constructor(
             return
         }
 
-        if (state.expectedAmount > 0 && amountPaidDouble > state.expectedAmount) {
-            _uiState.value = state.copy(error = "Amount paid cannot exceed expected amount")
-            return
-        }
-
         viewModelScope.launch {
             try {
                 _uiState.value = state.copy(isLoading = true)
-                val calculatedStatus = when {
-                    state.expectedAmount > 0 && amountPaidDouble >= state.expectedAmount -> "Paid"
-                    amountPaidDouble > 0 -> "Paid"
-                    else -> "Pending"
-                }
+                val calculatedStatus = com.example.features.rent.domain.util.RentBillingEngine.calculatePaymentStatus(
+                    expectedAmount = state.expectedAmount,
+                    amountPaid = amountPaidDouble,
+                    dueDateStr = state.dueDate
+                )
                 val updatedPayment = RentPaymentEntity(
                     id = state.paymentId ?: 0,
                     cloudId = state.cloudId,

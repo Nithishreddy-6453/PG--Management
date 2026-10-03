@@ -7,6 +7,7 @@ import com.example.data.firestore.repository.FirestoreExpenseRepository
 import com.example.data.firestore.repository.FirestorePaymentRepository
 import com.example.data.firestore.repository.FirestorePropertyRepository
 import com.example.data.firestore.repository.FirestoreRoomRepository
+import com.example.data.firestore.repository.FirestoreTenantMediaRepository
 import com.example.data.firestore.repository.FirestoreTenantRepository
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.CoroutineScope
@@ -32,6 +33,7 @@ class RealtimeSyncManager @Inject constructor(
     private val firestoreTenantRepository: FirestoreTenantRepository,
     private val firestorePaymentRepository: FirestorePaymentRepository,
     private val firestoreExpenseRepository: FirestoreExpenseRepository,
+    private val firestoreTenantMediaRepository: FirestoreTenantMediaRepository,
     private val syncEngine: SyncEngine,
     private val auth: FirebaseAuth,
     private val logger: PgLogger,
@@ -129,6 +131,21 @@ class RealtimeSyncManager @Inject constructor(
                         }
                         is PgResult.Failure -> {
                             logger.w(TAG, "Expense observation error: ${result.error.message}")
+                        }
+                    }
+                }
+            }
+
+            // 5. Observe Tenant Media Metadata (Profile Photos etc.)
+            launch {
+                firestoreTenantMediaRepository.observeTenantMedia(ownerId, includeDeleted = true).collect { result ->
+                    when (result) {
+                        is PgResult.Success -> {
+                            logger.d(TAG, "Realtime snapshot: Received ${result.data.size} tenant media records")
+                            syncEngine.reconcileRemoteTenantMedia(result.data, ownerId)
+                        }
+                        is PgResult.Failure -> {
+                            logger.w(TAG, "Tenant media observation error: ${result.error.message}")
                         }
                     }
                 }

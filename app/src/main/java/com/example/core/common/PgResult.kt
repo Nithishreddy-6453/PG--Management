@@ -12,6 +12,10 @@ sealed interface PgError : Serializable {
     data class SecurityError(override val message: String) : PgError
     data class ValidationError(override val message: String) : PgError
     data class NetworkError(override val message: String) : PgError
+    data class ConsentRequiredError(
+        override val message: String = "Additional Google account permissions required",
+        val consentIntent: android.content.Intent? = null
+    ) : PgError
     data class UnknownError(override val message: String, val throwable: Throwable? = null) : PgError
 }
 

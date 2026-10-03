@@ -153,6 +153,7 @@ fun TenantEntity.toDto(ownerId: String, deviceId: String = ""): TenantDto {
         occupation = occupation,
         companyOrCollege = companyOrCollege,
         advancePaid = advancePaid,
+        leavingDate = leavingDate,
         notes = notes,
         createdAt = createdAt,
         updatedAt = updatedAt,
@@ -193,6 +194,7 @@ fun TenantDto.toEntity(): TenantEntity {
         occupation = occupation,
         companyOrCollege = companyOrCollege,
         advancePaid = advancePaid,
+        leavingDate = leavingDate,
         notes = notes,
         ownerId = ownerId,
         propertyId = propId,
@@ -402,5 +404,55 @@ fun SettingsDto.toBusinessSettings(): BusinessSettings {
         defaultSecurityDeposit = defaultSecurityDeposit,
         defaultRentDueDay = defaultRentDueDay,
         currency = currency
+    )
+}
+
+// ==========================================
+// TENANT MEDIA MAPPERS
+// ==========================================
+fun com.example.data.database.TenantMediaEntity.toDto(): com.example.data.firestore.model.TenantMediaDto {
+    return com.example.data.firestore.model.TenantMediaDto(
+        cloudId = cloudId,
+        ownerId = ownerId,
+        propertyId = propertyId,
+        tenantCloudId = tenantCloudId,
+        driveFileId = driveFileId,
+        driveTenantFolderId = driveTenantFolderId,
+        drivePhotosFolderId = drivePhotosFolderId,
+        fileName = fileName,
+        mimeType = mimeType,
+        sizeBytes = sizeBytes,
+        mediaType = mediaType,
+        status = status,
+        driveFolderId = driveFolderId.ifBlank { drivePhotosFolderId },
+        createdAt = createdAt,
+        updatedAt = updatedAt,
+        deleted = deleted,
+        lastModifiedByDeviceId = lastModifiedByDeviceId
+    )
+}
+
+fun com.example.data.firestore.model.TenantMediaDto.toEntity(localFilePath: String = ""): com.example.data.database.TenantMediaEntity {
+    return com.example.data.database.TenantMediaEntity(
+        cloudId = cloudId,
+        ownerId = ownerId,
+        propertyId = propertyId,
+        tenantCloudId = tenantCloudId,
+        driveFileId = driveFileId,
+        driveTenantFolderId = driveTenantFolderId,
+        drivePhotosFolderId = drivePhotosFolderId.ifBlank { driveFolderId },
+        fileName = fileName,
+        mimeType = mimeType,
+        sizeBytes = sizeBytes,
+        mediaType = mediaType,
+        status = status,
+        localFilePath = localFilePath,
+        driveFolderId = driveFolderId.ifBlank { drivePhotosFolderId },
+        createdAt = createdAt,
+        updatedAt = updatedAt,
+        deleted = deleted,
+        syncStatus = "SYNCED",
+        lastSyncedAt = System.currentTimeMillis(),
+        lastModifiedByDeviceId = lastModifiedByDeviceId
     )
 }

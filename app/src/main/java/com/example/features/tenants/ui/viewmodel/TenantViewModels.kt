@@ -1,16 +1,24 @@
 package com.example.features.tenants.ui.viewmodel
 
+import android.content.Intent
+import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.core.common.PgError
+import com.example.core.common.PgResult
 import com.example.data.database.RoomEntity
 import com.example.data.database.TenantEntity
 import com.example.data.database.RentPaymentEntity
+import com.example.features.googleform.data.auth.GoogleFormsAuthManager
+import com.example.features.tenants.domain.model.TenantMedia
+import com.example.features.tenants.domain.model.UploadPhotoProgress
 import com.example.features.tenants.domain.repository.TenantRepository
 import com.example.features.tenants.domain.usecase.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -120,6 +128,12 @@ sealed interface TenantDetailsUiState {
     data class Success(
         val tenant: TenantEntity,
         val payments: List<RentPaymentEntity>,
+        val profilePhoto: TenantMedia? = null,
+        val uploadProgress: UploadPhotoProgress = UploadPhotoProgress.Idle,
+        val isPhotoUploading: Boolean = false,
+        val isPhotoDownloading: Boolean = false,
+        val photoDownloadError: String? = null,
+        val needsDriveConsent: Boolean = false,
         val isVacating: Boolean = false,
         val isDeleting: Boolean = false
     ) : TenantDetailsUiState
@@ -128,6 +142,7 @@ sealed interface TenantDetailsUiState {
 sealed interface TenantDetailsUiEffect {
     object NavigateBack : TenantDetailsUiEffect
     data class ShowToast(val message: String) : TenantDetailsUiEffect
+    data class LaunchGoogleConsent(val intent: Intent) : TenantDetailsUiEffect
 }
 
 @HiltViewModel
@@ -135,8 +150,15 @@ class TenantDetailsViewModel @Inject constructor(
     private val getTenantUseCase: GetTenantUseCase,
     private val vacateTenantUseCase: VacateTenantUseCase,
     private val deleteTenantUseCase: DeleteTenantUseCase,
+    private val updateLeavingDateUseCase: UpdateLeavingDateUseCase,
     private val repository: TenantRepository,
     private val getTenantLedgerUseCase: com.example.features.rent.domain.usecase.GetTenantLedgerUseCase,
+    private val getTenantProfilePhotoUseCase: GetTenantProfilePhotoUseCase,
+    private val uploadTenantProfilePhotoUseCase: UploadTenantProfilePhotoUseCase,
+    private val deleteTenantProfilePhotoUseCase: DeleteTenantProfilePhotoUseCase,
+    private val fetchAndCacheProfilePhotoUseCase: FetchAndCacheProfilePhotoUseCase,
+    private val syncTenantDriveFolderUseCase: SyncTenantDriveFolderUseCase,
+    private val googleAuthManager: GoogleFormsAuthManager,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -148,6 +170,8 @@ class TenantDetailsViewModel @Inject constructor(
 
     private val _uiEffect = MutableSharedFlow<TenantDetailsUiEffect>()
     val uiEffect: SharedFlow<TenantDetailsUiEffect> = _uiEffect.asSharedFlow()
+
+    private var pendingPhotoUploadUri: Uri? = null
 
     init {
         loadTenantDetails()
@@ -162,14 +186,218 @@ class TenantDetailsViewModel @Inject constructor(
         viewModelScope.launch {
             val tenant = getTenantUseCase.execute(tenantId)
             if (tenant != null) {
-                getTenantLedgerUseCase(tenantId).collectLatest { payments ->
-                    _uiState.value = TenantDetailsUiState.Success(
+                // Ensure photo is fetched / cached from Drive if available and sync human-readable folder name
+                if (tenant.cloudId.isNotBlank()) {
+                    launch { fetchAndCacheProfilePhotoUseCase(tenant.cloudId) }
+                    launch { syncTenantDriveFolderUseCase(tenant.cloudId) }
+                }
+
+                combine(
+                    getTenantLedgerUseCase(tenantId),
+                    getTenantProfilePhotoUseCase(tenant.cloudId)
+                ) { payments, photo ->
+                    val prev = _uiState.value
+                    val currentProgress = if (prev is TenantDetailsUiState.Success) prev.uploadProgress else UploadPhotoProgress.Idle
+                    val isUploading = if (prev is TenantDetailsUiState.Success) prev.isPhotoUploading else false
+                    val isDownloading = if (prev is TenantDetailsUiState.Success) prev.isPhotoDownloading else false
+                    val downloadErr = if (prev is TenantDetailsUiState.Success) prev.photoDownloadError else null
+                    val needsConsent = if (prev is TenantDetailsUiState.Success) prev.needsDriveConsent else false
+
+                    TenantDetailsUiState.Success(
                         tenant = tenant,
-                        payments = payments
+                        payments = payments,
+                        profilePhoto = photo,
+                        uploadProgress = currentProgress,
+                        isPhotoUploading = isUploading,
+                        isPhotoDownloading = isDownloading,
+                        photoDownloadError = downloadErr,
+                        needsDriveConsent = needsConsent
                     )
+                }.collectLatest { state ->
+                    _uiState.value = state
+
+                    // Check if tenant has remote photo on Google Drive but local file is not yet cached
+                    val photo = state.profilePhoto
+                    if (photo != null && photo.driveFileId.isNotBlank() && !photo.hasLocalFile) {
+                        downloadPhotoIfMissing(state.tenant.cloudId)
+                    }
                 }
             } else {
                 _uiState.value = TenantDetailsUiState.Error("Tenant not found.")
+            }
+        }
+    }
+
+    fun downloadPhotoIfMissing(tenantCloudId: String) {
+        val current = _uiState.value as? TenantDetailsUiState.Success ?: return
+        if (current.isPhotoDownloading) return
+
+        viewModelScope.launch {
+            val hasDrive = googleAuthManager.hasDriveScope()
+            if (!hasDrive) {
+                _uiState.value = (_uiState.value as? TenantDetailsUiState.Success)?.copy(
+                    needsDriveConsent = true,
+                    isPhotoDownloading = false
+                ) ?: return@launch
+                return@launch
+            }
+
+            _uiState.value = (_uiState.value as? TenantDetailsUiState.Success)?.copy(
+                isPhotoDownloading = true,
+                photoDownloadError = null,
+                needsDriveConsent = false
+            ) ?: return@launch
+
+            val res = fetchAndCacheProfilePhotoUseCase(tenantCloudId)
+            when (res) {
+                is PgResult.Success -> {
+                    _uiState.value = (_uiState.value as? TenantDetailsUiState.Success)?.copy(
+                        isPhotoDownloading = false,
+                        photoDownloadError = null,
+                        needsDriveConsent = false
+                    ) ?: return@launch
+                }
+                is PgResult.Failure -> {
+                    if (res.error is PgError.ConsentRequiredError) {
+                        _uiState.value = (_uiState.value as? TenantDetailsUiState.Success)?.copy(
+                            isPhotoDownloading = false,
+                            needsDriveConsent = true,
+                            photoDownloadError = null
+                        ) ?: return@launch
+                    } else {
+                        _uiState.value = (_uiState.value as? TenantDetailsUiState.Success)?.copy(
+                            isPhotoDownloading = false,
+                            photoDownloadError = res.error.message ?: "Failed to download photo from Google Drive"
+                        ) ?: return@launch
+                    }
+                }
+            }
+        }
+    }
+
+    fun retryPhotoDownload() {
+        val current = _uiState.value as? TenantDetailsUiState.Success ?: return
+        if (current.tenant.cloudId.isNotBlank()) {
+            downloadPhotoIfMissing(current.tenant.cloudId)
+        }
+    }
+
+    fun uploadProfilePhoto(uri: Uri) {
+        val currentState = _uiState.value
+        if (currentState !is TenantDetailsUiState.Success) return
+
+        pendingPhotoUploadUri = uri
+        _uiState.value = currentState.copy(
+            isPhotoUploading = true,
+            uploadProgress = UploadPhotoProgress.ProcessingImage("Processing image...")
+        )
+
+        viewModelScope.launch {
+            _uiState.value = (_uiState.value as? TenantDetailsUiState.Success)?.copy(
+                uploadProgress = UploadPhotoProgress.UploadingToDrive(10)
+            ) ?: return@launch
+
+            val result = uploadTenantProfilePhotoUseCase(
+                propertyId = currentState.tenant.propertyId,
+                tenantCloudId = currentState.tenant.cloudId,
+                imageUri = uri
+            )
+
+            when (result) {
+                is PgResult.Success -> {
+                    pendingPhotoUploadUri = null
+                    _uiState.value = (_uiState.value as? TenantDetailsUiState.Success)?.copy(
+                        profilePhoto = result.data,
+                        isPhotoUploading = false,
+                        uploadProgress = UploadPhotoProgress.Success(result.data),
+                        needsDriveConsent = false
+                    ) ?: return@launch
+                    _uiEffect.emit(TenantDetailsUiEffect.ShowToast("Profile photo uploaded to Google Drive."))
+                }
+                is PgResult.Failure -> {
+                    val error = result.error
+                    if (error is PgError.ConsentRequiredError) {
+                        _uiState.value = (_uiState.value as? TenantDetailsUiState.Success)?.copy(
+                            isPhotoUploading = false,
+                            needsDriveConsent = true,
+                            uploadProgress = UploadPhotoProgress.Error("Google Drive permission required.", isAuthError = true)
+                        ) ?: return@launch
+
+                        val intent = error.consentIntent ?: googleAuthManager.getDriveConsentIntent()
+                        _uiEffect.emit(TenantDetailsUiEffect.LaunchGoogleConsent(intent))
+                    } else {
+                        _uiState.value = (_uiState.value as? TenantDetailsUiState.Success)?.copy(
+                            isPhotoUploading = false,
+                            uploadProgress = UploadPhotoProgress.Error(error.message)
+                        ) ?: return@launch
+                        _uiEffect.emit(TenantDetailsUiEffect.ShowToast("Upload failed: ${error.message}"))
+                    }
+                }
+            }
+        }
+    }
+
+    fun deleteProfilePhoto() {
+        val currentState = _uiState.value
+        if (currentState !is TenantDetailsUiState.Success) return
+
+        viewModelScope.launch {
+            val result = deleteTenantProfilePhotoUseCase(currentState.tenant.cloudId)
+            if (result is PgResult.Success) {
+                _uiState.value = (_uiState.value as? TenantDetailsUiState.Success)?.copy(
+                    profilePhoto = null,
+                    uploadProgress = UploadPhotoProgress.Idle
+                ) ?: return@launch
+                _uiEffect.emit(TenantDetailsUiEffect.ShowToast("Profile photo removed."))
+            } else if (result is PgResult.Failure) {
+                _uiEffect.emit(TenantDetailsUiEffect.ShowToast("Failed to remove photo: ${result.error.message}"))
+            }
+        }
+    }
+
+    fun handleGoogleConsentResult(data: Intent?) {
+        viewModelScope.launch {
+            val result = googleAuthManager.handleSignInResult(data)
+            if (result is PgResult.Success) {
+                val info = result.data
+                if (info.hasDriveFileScope) {
+                    _uiState.value = (_uiState.value as? TenantDetailsUiState.Success)?.copy(
+                        needsDriveConsent = false
+                    ) ?: return@launch
+
+                    // Automatically download remote photo if waiting
+                    val current = _uiState.value as? TenantDetailsUiState.Success
+                    if (current != null && current.profilePhoto != null && !current.profilePhoto.hasLocalFile) {
+                        downloadPhotoIfMissing(current.tenant.cloudId)
+                    }
+
+                    // Automatically retry pending photo upload if exists
+                    pendingPhotoUploadUri?.let { uri ->
+                        uploadProfilePhoto(uri)
+                    }
+                } else {
+                    _uiEffect.emit(TenantDetailsUiEffect.ShowToast("Google Drive permission was not granted."))
+                }
+            }
+        }
+    }
+
+    fun getDriveConsentIntent(): Intent {
+        return googleAuthManager.getDriveConsentIntent()
+    }
+
+    fun updateLeavingDate(leavingDate: String) {
+        val currentState = _uiState.value
+        if (currentState is TenantDetailsUiState.Success) {
+            viewModelScope.launch {
+                val result = updateLeavingDateUseCase.execute(currentState.tenant.id, leavingDate)
+                if (result is TenantValidationResult.Success) {
+                    val msg = if (leavingDate.isBlank()) "Leaving date cleared." else "Leaving date updated to $leavingDate."
+                    _uiEffect.emit(TenantDetailsUiEffect.ShowToast(msg))
+                    loadTenantDetails()
+                } else if (result is TenantValidationResult.Error) {
+                    _uiEffect.emit(TenantDetailsUiEffect.ShowToast(result.message))
+                }
             }
         }
     }
@@ -223,6 +451,7 @@ data class AddTenantUiState(
     val securityDeposit: String = "",
     val advancePaid: String = "0.0",
     val moveInDate: String = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()),
+    val leavingDate: String = "",
     val roomNumber: String = "",
     val bedId: String = "",
     val notes: String = "",
@@ -281,6 +510,7 @@ class AddTenantViewModel @Inject constructor(
     fun onSecurityDepositChanged(value: String) = _uiState.update { it.copy(securityDeposit = value) }
     fun onAdvancePaidChanged(value: String) = _uiState.update { it.copy(advancePaid = value) }
     fun onMoveInDateChanged(value: String) = _uiState.update { it.copy(moveInDate = value) }
+    fun onLeavingDateChanged(value: String) = _uiState.update { it.copy(leavingDate = value) }
     fun onNotesChanged(value: String) = _uiState.update { it.copy(notes = value) }
     fun onKycDocTypeChanged(value: String) = _uiState.update { it.copy(kycDocType = value) }
 
@@ -346,6 +576,7 @@ class AddTenantViewModel @Inject constructor(
                 address = state.address,
                 occupation = state.occupation,
                 companyOrCollege = state.companyOrCollege,
+                leavingDate = state.leavingDate,
                 notes = state.notes
             )
             
@@ -381,6 +612,7 @@ data class EditTenantUiState(
     val securityDeposit: String = "",
     val advancePaid: String = "0.0",
     val moveInDate: String = "",
+    val leavingDate: String = "",
     val roomNumber: String = "",
     val bedId: String = "",
     val notes: String = "",
@@ -398,6 +630,7 @@ data class EditTenantUiState(
 class EditTenantViewModel @Inject constructor(
     private val getTenantUseCase: GetTenantUseCase,
     private val updateTenantUseCase: UpdateTenantUseCase,
+    private val syncTenantDriveFolderUseCase: SyncTenantDriveFolderUseCase,
     private val repository: TenantRepository,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
@@ -451,6 +684,7 @@ class EditTenantViewModel @Inject constructor(
                         securityDeposit = tenant.securityDeposit.toString(),
                         advancePaid = tenant.advancePaid.toString(),
                         moveInDate = tenant.moveInDate,
+                        leavingDate = tenant.leavingDate,
                         roomNumber = tenant.roomNumber,
                         bedId = tenant.bedId,
                         notes = tenant.notes,
@@ -480,6 +714,7 @@ class EditTenantViewModel @Inject constructor(
     fun onSecurityDepositChanged(value: String) = _uiState.update { it.copy(securityDeposit = value) }
     fun onAdvancePaidChanged(value: String) = _uiState.update { it.copy(advancePaid = value) }
     fun onMoveInDateChanged(value: String) = _uiState.update { it.copy(moveInDate = value) }
+    fun onLeavingDateChanged(value: String) = _uiState.update { it.copy(leavingDate = value) }
     fun onNotesChanged(value: String) = _uiState.update { it.copy(notes = value) }
     fun onKycDocTypeChanged(value: String) = _uiState.update { it.copy(kycDocType = value) }
 
@@ -534,11 +769,16 @@ class EditTenantViewModel @Inject constructor(
                 address = state.address,
                 occupation = state.occupation,
                 companyOrCollege = state.companyOrCollege,
+                leavingDate = state.leavingDate,
                 notes = state.notes
             )
             
             when (result) {
                 is TenantValidationResult.Success -> {
+                    val updated = getTenantUseCase.execute(state.id)
+                    if (updated != null && updated.cloudId.isNotBlank()) {
+                        syncTenantDriveFolderUseCase(updated.cloudId)
+                    }
                     _uiState.update { it.copy(isLoading = false, isSuccess = true) }
                 }
                 is TenantValidationResult.Error -> {

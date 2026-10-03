@@ -42,7 +42,7 @@ class EditRoomViewModel @Inject constructor(
     private val _saveSuccessEvent = MutableSharedFlow<Unit>()
     val saveSuccessEvent: SharedFlow<Unit> = _saveSuccessEvent.asSharedFlow()
 
-    private val roomNumberFromNav: String? = savedStateHandle["roomNumber"]
+    private val roomNumberFromNav: String? = savedStateHandle.get<String>("roomId") ?: savedStateHandle.get<String>("roomNumber")
 
     init {
         roomNumberFromNav?.let { loadRoom(it) }

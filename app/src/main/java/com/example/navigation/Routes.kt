@@ -53,6 +53,11 @@ sealed class Screen(val route: String) {
     object TenantDetails : Screen("tenant_details/{tenantId}") {
         fun createRoute(tenantId: Int) = "tenant_details/$tenantId"
     }
+    object TenantRegistrationForm : Screen("tenant_registration_form")
+    object PendingRegistrations : Screen("pending_registrations")
+    object PendingRegistrationDetails : Screen("pending_registration_details/{registrationId}") {
+        fun createRoute(registrationId: String) = "pending_registration_details/$registrationId"
+    }
     object SettingsHome : Screen("settings_home")
     object BusinessSettings : Screen("settings_business")
     object AppSettings : Screen("settings_app")

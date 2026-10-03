@@ -116,6 +116,24 @@ object DatabaseModule {
 
     @Provides
     fun provideConflictRecordDao(database: AppDatabase): ConflictRecordDao = database.conflictRecordDao()
+
+    @Provides
+    fun provideTenantRegistrationFormDao(database: AppDatabase): com.example.data.database.TenantRegistrationFormDao = database.tenantRegistrationFormDao()
+
+    @Provides
+    fun providePendingTenantRegistrationDao(database: AppDatabase): com.example.data.database.PendingTenantRegistrationDao = database.pendingTenantRegistrationDao()
+
+    @Provides
+    fun provideTenantMediaDao(database: AppDatabase): com.example.data.database.TenantMediaDao = database.tenantMediaDao()
+
+    @Provides
+    fun provideDriveFolderDao(database: AppDatabase): com.example.data.database.DriveFolderDao = database.driveFolderDao()
+
+    @Provides
+    fun provideBedDao(database: AppDatabase): com.example.data.database.BedDao = database.bedDao()
+
+    @Provides
+    fun provideBedAssignmentDao(database: AppDatabase): com.example.data.database.BedAssignmentDao = database.bedAssignmentDao()
 }
 
 @Module
@@ -139,12 +157,14 @@ object RepositoryModule {
         tenantDao: TenantDao,
         rentPaymentDao: RentPaymentDao,
         expenseDao: ExpenseDao,
+        bedDao: com.example.data.database.BedDao,
+        bedAssignmentDao: com.example.data.database.BedAssignmentDao,
         ownerProfileDao: OwnerProfileDao,
         propertyDao: PropertyDao,
         currentPropertyManager: CurrentPropertyManager,
         syncCoordinator: SyncCoordinator
     ): PgRepository {
-        return PgRepository(roomDao, tenantDao, rentPaymentDao, expenseDao, ownerProfileDao, propertyDao, currentPropertyManager, syncCoordinator)
+        return PgRepository(roomDao, tenantDao, rentPaymentDao, expenseDao, bedDao, bedAssignmentDao, ownerProfileDao, propertyDao, currentPropertyManager, syncCoordinator)
     }
 
     @Provides
@@ -165,10 +185,12 @@ object RepositoryModule {
         roomDao: RoomDao,
         tenantDao: TenantDao,
         rentPaymentDao: RentPaymentDao,
+        bedDao: com.example.data.database.BedDao,
+        bedAssignmentDao: com.example.data.database.BedAssignmentDao,
         currentPropertyManager: CurrentPropertyManager,
         syncCoordinator: SyncCoordinator
     ): com.example.features.rooms.domain.repository.RoomRepository {
-        return com.example.features.rooms.data.repository.RoomRepositoryImpl(roomDao, tenantDao, rentPaymentDao, currentPropertyManager, syncCoordinator)
+        return com.example.features.rooms.data.repository.RoomRepositoryImpl(roomDao, tenantDao, rentPaymentDao, bedDao, bedAssignmentDao, currentPropertyManager, syncCoordinator)
     }
 
     @Provides
@@ -178,11 +200,15 @@ object RepositoryModule {
         tenantDao: TenantDao,
         rentPaymentDao: RentPaymentDao,
         expenseDao: ExpenseDao,
+        bedDao: com.example.data.database.BedDao,
+        bedAssignmentDao: com.example.data.database.BedAssignmentDao,
+        propertyDao: PropertyDao,
         ownerProfileDao: OwnerProfileDao,
-        currentPropertyManager: CurrentPropertyManager
+        currentPropertyManager: CurrentPropertyManager,
+        currentBillingMonthManager: com.example.features.rent.domain.util.CurrentBillingMonthManager
     ): com.example.features.dashboard.data.DashboardRepository {
         return com.example.features.dashboard.data.DashboardRepository(
-            roomDao, tenantDao, rentPaymentDao, expenseDao, ownerProfileDao, currentPropertyManager
+            roomDao, tenantDao, rentPaymentDao, expenseDao, bedDao, bedAssignmentDao, propertyDao, ownerProfileDao, currentPropertyManager, currentBillingMonthManager
         )
     }
 
@@ -191,10 +217,21 @@ object RepositoryModule {
     fun provideRentRepository(
         rentPaymentDao: RentPaymentDao,
         tenantDao: TenantDao,
+        propertyDao: PropertyDao,
         currentPropertyManager: CurrentPropertyManager,
-        syncCoordinator: SyncCoordinator
+        currentBillingMonthManager: com.example.features.rent.domain.util.CurrentBillingMonthManager,
+        syncCoordinator: SyncCoordinator,
+        excelDriveBackupManager: com.example.features.excel.data.ExcelDriveBackupManager
     ): com.example.features.rent.domain.repository.RentRepository {
-        return com.example.features.rent.data.repository.RentRepositoryImpl(rentPaymentDao, tenantDao, currentPropertyManager, syncCoordinator)
+        return com.example.features.rent.data.repository.RentRepositoryImpl(
+            rentPaymentDao,
+            tenantDao,
+            propertyDao,
+            currentPropertyManager,
+            currentBillingMonthManager,
+            syncCoordinator,
+            excelDriveBackupManager
+        )
     }
 
     @Provides

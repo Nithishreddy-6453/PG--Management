@@ -1,5 +1,9 @@
 package com.example.data.repository
 
+import com.example.data.database.BedAssignmentDao
+import com.example.data.database.BedAssignmentEntity
+import com.example.data.database.BedDao
+import com.example.data.database.BedEntity
 import com.example.data.database.ExpenseDao
 import com.example.data.database.ExpenseEntity
 import com.example.data.database.OwnerProfileDao
@@ -25,6 +29,8 @@ class PgRepository @Inject constructor(
     private val tenantDao: TenantDao,
     private val rentPaymentDao: RentPaymentDao,
     private val expenseDao: ExpenseDao,
+    private val bedDao: BedDao,
+    private val bedAssignmentDao: BedAssignmentDao,
     private val ownerProfileDao: OwnerProfileDao,
     private val propertyDao: PropertyDao,
     private val currentPropertyManager: CurrentPropertyManager,
@@ -33,6 +39,16 @@ class PgRepository @Inject constructor(
     val allRooms: Flow<List<RoomEntity>> =
         currentPropertyManager.currentPropertyIdFlow.flatMapLatest { propId ->
             roomDao.getRoomsForPropertyFlow(propId)
+        }
+
+    val allBeds: Flow<List<BedEntity>> =
+        currentPropertyManager.currentPropertyIdFlow.flatMapLatest { propId ->
+            bedDao.getAllBedsForPropertyFlow(propId)
+        }
+
+    val allAssignments: Flow<List<BedAssignmentEntity>> =
+        currentPropertyManager.currentPropertyIdFlow.flatMapLatest { propId ->
+            bedAssignmentDao.getAllAssignmentsFlow(propId)
         }
 
     val allTenants: Flow<List<TenantEntity>> =

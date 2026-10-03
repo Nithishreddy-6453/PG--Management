@@ -64,15 +64,12 @@ class PgViewModel @Inject constructor(
         val activeTenants = tenantsList.filter { !it.deleted && it.roomNumber.isNotBlank() }
         val occupiedBeds = activeTenants.size
         
-        // Total rent collected (Status = "Paid")
-        val rentCollected = paymentsList
-            .filter { it.status == "Paid" }
-            .sumOf { it.amount }
+        // Total rent collected
+        val activePayments = paymentsList.filter { !it.deleted }
+        val rentCollected = activePayments.sumOf { it.amountPaid }
 
-        // Total rent due/outstanding (Status = "Pending" or "Overdue")
-        val rentDue = paymentsList
-            .filter { it.status != "Paid" }
-            .sumOf { it.amount }
+        // Total rent due/outstanding
+        val rentDue = activePayments.sumOf { (it.amount - it.amountPaid).coerceAtLeast(0.0) }
 
         // Total operational expenses
         val totalExpenses = expensesList.sumOf { it.amount }

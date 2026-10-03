@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import android.widget.Toast
 import com.example.core.designsystem.LocalSpacing
 import com.example.data.database.RentPaymentEntity
@@ -79,6 +80,9 @@ fun RoomDetailsScreen(
                     }
                 },
                 actions = {
+                    com.example.core.language.GlobalLanguageToggle(
+                        modifier = Modifier.padding(end = 4.dp)
+                    )
                     if (uiState is RoomDetailsUiState.Success) {
                         val roomNo = (uiState as RoomDetailsUiState.Success).roomSummary.roomNumber
                         IconButton(
@@ -368,18 +372,36 @@ fun RoomTenantsSection(
                             }
                         }
 
-                        // Allocated Bed ID
-                        Box(
-                            modifier = Modifier
-                                .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(8.dp))
-                                .padding(horizontal = spacing.small, vertical = 4.dp)
-                        ) {
-                            Text(
-                                tenant.bedId,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                        Column(horizontalAlignment = Alignment.End) {
+                            // Allocated Bed ID
+                            Box(
+                                modifier = Modifier
+                                    .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(8.dp))
+                                    .padding(horizontal = spacing.small, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    tenant.bedId,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            if (tenant.leavingDate.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .background(Color(0xFFFEF3C7), RoundedCornerShape(6.dp))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "Vacating: ${tenant.leavingDate}",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFD97706)
+                                    )
+                                }
+                            }
                         }
                     }
                 }

@@ -36,7 +36,9 @@ class RoomDetailsViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
-    private val roomNumber: String = savedStateHandle["roomNumber"] ?: ""
+    private val roomNumber: String = savedStateHandle.get<String>("roomId")
+        ?: savedStateHandle.get<String>("roomNumber")
+        ?: ""
 
     private val _deleteEvent = MutableSharedFlow<RoomValidationResult>()
     val deleteEvent: SharedFlow<RoomValidationResult> = _deleteEvent.asSharedFlow()

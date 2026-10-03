@@ -55,6 +55,11 @@ fun AppPreferencesScreen(
                         Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
+                actions = {
+                    com.example.core.language.GlobalLanguageToggle(
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
                     titleContentColor = MaterialTheme.colorScheme.onBackground,
@@ -180,8 +185,15 @@ fun AppPreferencesScreen(
 
                 PreferenceCard {
                     var langExpanded by remember { mutableStateOf(false) }
-                    val languages = listOf("English")
-                    val currentLangDisplay = if (uiState.language == "en") "English" else uiState.language
+                    val languagesMap = listOf(
+                        "English (EN)" to "EN",
+                        "తెలుగు (Telugu - TE)" to "TE",
+                        "हिन्दी (Hindi - HI)" to "HI",
+                        "ಕನ್ನಡ (Kannada - KN)" to "KN",
+                        "தமிழ் (Tamil - TA)" to "TA"
+                    )
+                    val activeGlobalLang by com.example.core.language.AppLanguageManager.languageFlow.collectAsState()
+                    val currentLangDisplay = languagesMap.find { it.second.equals(activeGlobalLang, ignoreCase = true) }?.first ?: "English (EN)"
                     
                     PreferenceDropdownItem(
                         icon = Icons.Default.Language,
@@ -189,10 +201,13 @@ fun AppPreferencesScreen(
                         selectedValue = currentLangDisplay,
                         expanded = langExpanded,
                         onExpandedChange = { langExpanded = it },
-                        options = languages,
-                        onOptionSelected = {
-                            val code = if (it == "English") "en" else it
-                            viewModel.updateLanguage(code)
+                        options = languagesMap.map { it.first },
+                        onOptionSelected = { selected ->
+                            val match = languagesMap.find { it.first == selected }
+                            if (match != null) {
+                                com.example.core.language.AppLanguageManager.setLanguage(match.second)
+                                viewModel.updateLanguage(match.second.lowercase())
+                            }
                             langExpanded = false
                         }
                     )

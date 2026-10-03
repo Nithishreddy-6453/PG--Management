@@ -10,6 +10,7 @@ import com.example.features.excel.domain.model.ExportPeriodType
 import com.example.features.excel.domain.model.ImportPreviewResult
 import com.example.features.excel.domain.model.ImportValidationException
 import com.example.features.excel.domain.model.TenantImportRow
+import com.example.features.rent.domain.util.RentBillingEngine
 import com.example.features.tenants.domain.repository.TenantRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -37,126 +38,272 @@ class ExcelManager @Inject constructor(
         val currentProperty = pgRepository.currentProperty.firstOrNull()
         val ownerProfile = pgRepository.ownerProfile.firstOrNull()
         val allRooms = pgRepository.allRooms.firstOrNull().orEmpty().filter { !it.deleted }
+        val allBeds = pgRepository.allBeds.firstOrNull().orEmpty().filter { !it.deleted }
         val allTenants = pgRepository.allTenants.firstOrNull().orEmpty()
-        val activeTenants = allTenants.filter { !it.deleted }
+        val allAssignments = pgRepository.allAssignments.firstOrNull().orEmpty().filter { !it.deleted }
         val allPayments = pgRepository.allPayments.firstOrNull().orEmpty().filter { !it.deleted }
         val allExpenses = pgRepository.allExpenses.firstOrNull().orEmpty().filter { !it.deleted }
 
-        val activePgName = currentProperty?.propertyName ?: ownerProfile?.pgName ?: "PG Manager"
-        val location = listOfNotNull(currentProperty?.address, currentProperty?.city, currentProperty?.state)
-            .filter { it.isNotBlank() }
-            .joinToString(", ")
-            .ifBlank { "Not Specified" }
+        val activePgName = currentProperty?.propertyName ?: ownerProfile?.pgName ?: "Emerald Stays"
 
-        val (periodLabel, filteredPayments, filteredExpenses) = filterDataByPeriod(config, allPayments, allExpenses)
+        // Resolve Report Period
+        val cal = Calendar.getInstance()
+        val reportPeriod: com.example.features.reports.domain.model.ReportPeriod = when (config.periodType) {
+            ExportPeriodType.THIS_MONTH -> {
+                val currentMonthStr = RentBillingEngine.formatCanonicalBillingMonth(cal.time)
+                com.example.features.reports.domain.model.ReportPeriod.Monthly(currentMonthStr)
+            }
+            ExportPeriodType.PREVIOUS_MONTH -> {
+                cal.add(Calendar.MONTH, -1)
+                val prevMonthStr = RentBillingEngine.formatCanonicalBillingMonth(cal.time)
+                com.example.features.reports.domain.model.ReportPeriod.Monthly(prevMonthStr)
+            }
+            ExportPeriodType.CUSTOM_RANGE -> {
+                val start = config.customStartDate.ifBlank { "1970-01-01" }
+                val end = config.customEndDate.ifBlank { "2099-12-31" }
+                com.example.features.reports.domain.model.ReportPeriod.CustomRange(start, end)
+            }
+            ExportPeriodType.ALL_DATA -> {
+                val currentMonthStr = RentBillingEngine.formatCanonicalBillingMonth(cal.time)
+                com.example.features.reports.domain.model.ReportPeriod.Monthly(currentMonthStr)
+            }
+        }
 
-        // Summary Calculations
-        val totalRooms = allRooms.size
-        val totalBeds = allRooms.sumOf { it.capacity }
-        val occupiedBeds = activeTenants.size.coerceAtMost(totalBeds)
-        val availableBeds = (totalBeds - occupiedBeds).coerceAtLeast(0)
-        val totalActiveTenants = activeTenants.size
+        val report = com.example.features.reports.domain.engine.ReportCalculationEngine.calculateReport(
+            property = currentProperty,
+            period = reportPeriod,
+            rooms = allRooms,
+            beds = allBeds,
+            tenants = allTenants,
+            assignments = allAssignments,
+            payments = allPayments,
+            expenses = allExpenses
+        )
 
-        val totalRent = filteredPayments.sumOf { it.amount }
-        val rentCollected = filteredPayments.sumOf { it.amountPaid }
-        val rentPending = filteredPayments.sumOf { (it.amount - it.amountPaid).coerceAtLeast(0.0) }
-        val totalExpenses = filteredExpenses.sumOf { it.amount }
-        val netAmount = rentCollected - totalExpenses
-
-        // 1. Sheet: Summary
+        // 1. Sheet: Owner Overview
         val summarySheet = ExcelSheetData(
-            title = "Summary",
-            headers = listOf("Metric / Field", "Value"),
+            title = "Owner Overview",
+            headers = listOf("Field", "Value"),
             rows = listOf(
-                listOf("PG Name", activePgName),
-                listOf("Location", location),
-                listOf("Report Period", periodLabel),
-                listOf("Total Rooms", totalRooms),
-                listOf("Total Beds", totalBeds),
-                listOf("Occupied Beds", occupiedBeds),
-                listOf("Available Beds", availableBeds),
-                listOf("Total Active Tenants", totalActiveTenants),
-                listOf("Total Rent", totalRent),
-                listOf("Rent Collected", rentCollected),
-                listOf("Rent Pending", rentPending),
-                listOf("Total Expenses", totalExpenses),
-                listOf("Net Amount", netAmount)
+                listOf("Property Name", report.overview.propertyName),
+                listOf("Report Month", report.overview.reportMonth),
+                listOf("Report Period", report.overview.reportPeriod),
+                listOf("Generated At", report.overview.generatedAt),
+                listOf("Last Updated", report.overview.lastUpdated),
+                listOf("", ""),
+                listOf("OCCUPANCY", ""),
+                listOf("Tenants / PG Capacity", report.overview.tenantsCapacityRatioText),
+                listOf("Occupancy Rate", "${String.format(Locale.US, "%.1f", report.overview.occupancyPercentage)}%"),
+                listOf("Vacancies", "${report.overview.vacanciesCount} Vacanc${if (report.overview.vacanciesCount == 1) "y" else "ies"}"),
+                listOf("", ""),
+                listOf("FINANCIAL SUMMARY (MONEY)", ""),
+                listOf("Rent Due", report.overview.rentDue),
+                listOf("Rent Received for This Month", report.overview.rentReceivedThisMonth),
+                listOf("Rent Still to Collect", report.overview.rentStillToCollect),
+                listOf("Previous Dues Received", report.overview.previousDuesReceived),
+                listOf("Advance / Credit", report.overview.advanceCredit),
+                listOf("Total Rent Collected", report.overview.totalRentCollected),
+                listOf("Total Expenses", report.overview.expenses),
+                listOf("Money Left After Expenses", report.overview.moneyLeftAfterExpenses)
             )
         )
 
-        // 2. Sheet: Tenants
-        val tenantRows = allTenants.map { t ->
-            listOf(
-                t.name,
-                t.roomNumber,
-                t.phone.ifBlank { "N/A" },
-                t.monthlyRent,
-                t.moveInDate,
-                if (t.deleted) "Vacated" else "N/A",
-                if (t.deleted) "Vacated" else "Active"
-            )
-        }
-        val tenantsSheet = ExcelSheetData(
-            title = "Tenants",
-            headers = listOf("Tenant Name", "Room Number", "Phone Number", "Monthly Rent", "Join Date", "Vacate Date", "Current Status"),
-            rows = tenantRows
+        // 2. Sheet: Monthly History
+        val monthlyHistorySheet = ExcelSheetData(
+            title = "Monthly History",
+            headers = listOf("Month", "Rent Due", "Rent Collected", "Previous Dues Received", "Advance / Credit", "Rent Still to Collect", "Expenses", "Money Left After Expenses", "Active Tenants", "Total Capacity", "Occupancy %", "Available Beds"),
+            rows = report.monthlyHistory.map { h ->
+                listOf(
+                    h.month,
+                    h.rentDue,
+                    h.rentCollected,
+                    h.previousDuesReceived,
+                    h.advanceCredit,
+                    h.rentStillToCollect,
+                    h.expenses,
+                    h.moneyLeftAfterExpenses,
+                    h.activeTenants,
+                    h.totalCapacity,
+                    "${String.format(Locale.US, "%.1f", h.occupancyPercentage)}%",
+                    h.availableBeds
+                )
+            }
         )
 
-        // 3. Sheet: Rent / Payments
-        val paymentRows = filteredPayments.map { p ->
-            val pendingAmount = (p.amount - p.amountPaid).coerceAtLeast(0.0)
-            listOf(
-                p.tenantName,
-                p.roomNumber,
-                p.billingMonth,
-                p.amount,
-                p.amountPaid,
-                pendingAmount,
-                p.paymentDate ?: p.dueDate,
-                p.status
-            )
-        }
-        val paymentsSheet = ExcelSheetData(
-            title = "Rent & Payments",
-            headers = listOf("Tenant Name", "Room Number", "Billing Month", "Rent Amount", "Amount Paid", "Pending Amount", "Payment Date", "Payment Status"),
-            rows = paymentRows
+        // 3. Sheet: Rent Collection
+        val rentCollectionSheet = ExcelSheetData(
+            title = "Rent Collection",
+            headers = listOf("Tenant Name", "Room", "Bed", "Monthly Rent", "Rent Due", "Rent Collected", "Rent Still to Collect", "Advance / Credit", "Status", "Due Date", "Payment Date", "Basis / Proration"),
+            rows = report.rentMetrics.tenantRentRecords.map { r ->
+                listOf(
+                    r.tenantName,
+                    r.roomNumber,
+                    r.bedId,
+                    r.standardMonthlyRent,
+                    r.rentDue,
+                    r.rentCollected,
+                    r.rentStillToCollect,
+                    r.advanceCredit,
+                    r.status,
+                    r.dueDate,
+                    r.paymentDate ?: "N/A",
+                    r.basisExplanation
+                )
+            }
         )
 
         // 4. Sheet: Expenses
-        val expenseRows = filteredExpenses.map { e ->
-            val desc = if (e.title.isNotBlank()) "${e.title} - ${e.notes}".trim(' ', '-') else e.notes
-            listOf(
-                e.date,
-                e.category,
-                desc,
-                e.amount
-            )
-        }
         val expensesSheet = ExcelSheetData(
             title = "Expenses",
-            headers = listOf("Date", "Category", "Description", "Amount"),
-            rows = expenseRows
+            headers = listOf("Date", "Category", "Title / Description", "Amount", "Payment Method", "Vendor", "Notes"),
+            rows = report.expenseReport.expenseRecords.map { e ->
+                val desc = if (e.title.isNotBlank()) e.title else e.notes
+                listOf(
+                    e.date,
+                    e.category,
+                    desc,
+                    e.amount,
+                    e.paymentMethod,
+                    e.vendor ?: "N/A",
+                    e.notes
+                )
+            }
         )
 
-        // 5. Sheet: Rooms
-        val roomRows = allRooms.map { r ->
-            val occ = activeTenants.count { it.roomNumber.equals(r.roomNumber, ignoreCase = true) }
-            val avail = (r.capacity - occ).coerceAtLeast(0)
-            listOf(
-                r.roomNumber,
-                r.capacity,
-                occ,
-                avail,
-                r.ratePerBed
-            )
-        }
+        // 5. Sheet: Room Status
         val roomsSheet = ExcelSheetData(
-            title = "Rooms",
-            headers = listOf("Room Number", "Total Beds", "Occupied Beds", "Available Beds", "Room Rent"),
-            rows = roomRows
+            title = "Room Status",
+            headers = listOf("Room Number", "Floor", "Capacity", "Occupied Beds", "Available Beds", "Blocked Beds", "Occupancy %", "Status", "Active Tenants"),
+            rows = report.bedOccupancy.roomsDetail.map { r ->
+                listOf(
+                    r.roomNumber,
+                    r.floor,
+                    r.capacity,
+                    r.occupiedBeds,
+                    r.availableBeds,
+                    r.blockedBeds,
+                    "${String.format(Locale.US, "%.1f", r.occupancyPercentage)}%",
+                    r.status,
+                    r.activeTenants.joinToString(", ")
+                )
+            }
         )
 
-        val sheets = listOf(summarySheet, tenantsSheet, paymentsSheet, expensesSheet, roomsSheet)
+        // 6. Sheet: Tenant Statements
+        val tenantStatementsSheet = ExcelSheetData(
+            title = "Tenant Statements",
+            headers = listOf("Tenant Name", "Room", "Phone", "Previous Outstanding", "Current Month Balance", "Total Currently Due", "Advance / Credit"),
+            rows = report.tenantStatements.map { ts ->
+                listOf(
+                    ts.tenantName,
+                    ts.roomNumber,
+                    ts.phone,
+                    ts.previousOutstanding,
+                    ts.currentMonthBalance,
+                    ts.totalCurrentlyDue,
+                    ts.advanceCredit
+                )
+            }
+        )
+
+        // 7. Sheet: Raw Rent Ledger
+        val rawRentLedgerSheet = ExcelSheetData(
+            title = "Raw Rent Ledger",
+            headers = listOf("Payment ID", "Cloud ID", "Tenant ID", "Tenant Name", "Room Number", "Billing Month", "Amount Expected", "Amount Paid", "Due Date", "Payment Date", "Status"),
+            rows = allPayments.map { p ->
+                listOf(
+                    p.id,
+                    p.cloudId,
+                    p.tenantId,
+                    p.tenantName,
+                    p.roomNumber,
+                    p.billingMonth,
+                    p.amount,
+                    p.amountPaid,
+                    p.dueDate,
+                    p.paymentDate ?: "N/A",
+                    p.status
+                )
+            }
+        )
+
+        // 8. Sheet: Payments
+        val paymentsSheet = ExcelSheetData(
+            title = "Payments",
+            headers = listOf("Payment Date", "Tenant Name", "Room", "Bed", "Billing Month", "Amount", "Payment Method", "Reference", "Allocation Type", "Notes"),
+            rows = report.paymentHistory.map { p ->
+                listOf(
+                    p.paymentDate,
+                    p.tenantName,
+                    p.roomNumber,
+                    p.bedId,
+                    p.billingMonth,
+                    p.amount,
+                    p.paymentMethod,
+                    p.reference,
+                    p.allocationType,
+                    p.notes
+                )
+            }
+        )
+
+        // 9. Sheet: Raw Expense Ledger
+        val rawExpenseSheet = ExcelSheetData(
+            title = "Raw Expense Ledger",
+            headers = listOf("Expense ID", "Date", "Title", "Category", "Amount", "Payment Method", "Vendor", "Notes", "Sync Status"),
+            rows = allExpenses.map { e ->
+                listOf(
+                    e.id,
+                    e.date,
+                    e.title,
+                    e.category,
+                    e.amount,
+                    e.paymentMethod,
+                    e.vendor ?: "N/A",
+                    e.notes,
+                    e.syncStatus
+                )
+            }
+        )
+
+        // 10. Sheet: Expense Payments
+        val expensePaymentsSheet = ExcelSheetData(
+            title = "Expense Payments",
+            headers = listOf("Date", "Category", "Title", "Amount Paid", "Payment Method", "Vendor"),
+            rows = allExpenses.filter { !it.paymentMethod.equals("Pending", true) && !it.paymentMethod.equals("Unpaid", true) }.map { e ->
+                listOf(
+                    e.date,
+                    e.category,
+                    e.title,
+                    e.amount,
+                    e.paymentMethod,
+                    e.vendor ?: "N/A"
+                )
+            }
+        )
+
+        // 11. Sheet: Backup Log
+        val backupLogSheet = ExcelSheetData(
+            title = "Backup Log",
+            headers = listOf("Timestamp", "Operation", "Property Name", "Billing Month", "Status", "Details"),
+            rows = listOf(
+                listOf(report.overview.generatedAt, "Master Excel Export", report.overview.propertyName, report.overview.reportMonth, "Success", "Exported 11 worksheets with complete owner-friendly model")
+            )
+        )
+
+        val sheets = listOf(
+            summarySheet,
+            monthlyHistorySheet,
+            rentCollectionSheet,
+            expensesSheet,
+            roomsSheet,
+            tenantStatementsSheet,
+            rawRentLedgerSheet,
+            paymentsSheet,
+            rawExpenseSheet,
+            expensePaymentsSheet,
+            backupLogSheet
+        )
 
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val cleanPgName = activePgName.replace("[^a-zA-Z0-9]".toRegex(), "_")

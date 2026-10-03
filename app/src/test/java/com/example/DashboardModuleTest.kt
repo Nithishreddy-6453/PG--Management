@@ -3,43 +3,27 @@ package com.example
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
-import com.example.data.database.AppDatabase
-import com.example.data.database.RoomDao
-import com.example.data.database.TenantDao
-import com.example.data.database.RentPaymentDao
-import com.example.data.database.ExpenseDao
-import com.example.data.database.OwnerProfileDao
-import com.example.data.database.RoomEntity
-import com.example.data.database.TenantEntity
-import com.example.data.database.RentPaymentEntity
-import com.example.data.database.ExpenseEntity
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.example.data.database.*
 import com.example.features.dashboard.data.DashboardRepository
-import com.example.features.dashboard.domain.usecase.OccupancyUseCase
-import com.example.features.dashboard.domain.usecase.RevenueUseCase
-import com.example.features.dashboard.domain.usecase.ExpensesUseCase
-import com.example.features.dashboard.domain.usecase.ProfitUseCase
-import com.example.features.dashboard.domain.usecase.RecentActivityUseCase
-import com.example.features.dashboard.domain.usecase.DashboardSummaryUseCase
+import com.example.features.dashboard.domain.usecase.*
 import com.example.features.dashboard.ui.DashboardUiState
 import com.example.features.dashboard.ui.DashboardViewModel
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.test.runTest
+import com.example.features.rent.domain.util.CurrentBillingMonthManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.setMain
-import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
 import org.junit.After
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
+import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
 
-@RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@RunWith(AndroidJUnit4::class)
 class DashboardModuleTest {
 
     private lateinit var db: AppDatabase
@@ -49,6 +33,7 @@ class DashboardModuleTest {
     private lateinit var expenseDao: ExpenseDao
     private lateinit var ownerProfileDao: OwnerProfileDao
     private lateinit var currentPropertyManager: com.example.features.properties.data.CurrentPropertyManager
+    private lateinit var currentBillingMonthManager: CurrentBillingMonthManager
     private lateinit var repository: DashboardRepository
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -66,8 +51,21 @@ class DashboardModuleTest {
         expenseDao = db.expenseDao()
         ownerProfileDao = db.ownerProfileDao()
         currentPropertyManager = com.example.features.properties.data.CurrentPropertyManager(context, db.propertyDao())
+        currentBillingMonthManager = CurrentBillingMonthManager(context)
+        currentBillingMonthManager.setCurrentBillingMonth("July 2026")
         
-        repository = DashboardRepository(roomDao, tenantDao, rentPaymentDao, expenseDao, ownerProfileDao, currentPropertyManager)
+        repository = DashboardRepository(
+            roomDao,
+            tenantDao,
+            rentPaymentDao,
+            expenseDao,
+            db.bedDao(),
+            db.bedAssignmentDao(),
+            db.propertyDao(),
+            ownerProfileDao,
+            currentPropertyManager,
+            currentBillingMonthManager
+        )
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -97,19 +95,20 @@ class DashboardModuleTest {
             email = "john@example.com",
             emergencyContact = "1234567890",
             roomNumber = "101",
-            bedId = "Bed A",
+            bedId = "101-A",
             monthlyRent = 6000.0,
             securityDeposit = 12000.0,
             moveInDate = "2026-07-01",
             isKycUploaded = true,
-            kycDocType = "Aadhaar"
+            kycDocType = "Aadhaar Card",
+            propertyId = "property_default"
         )
         tenantDao.insertTenant(tenant1)
 
         val tenantsList = repository.getTenantsFlow().first()
         assertEquals(1, tenantsList.size)
 
-        // 3. Insert rent payment records
+        // 3. Insert rent payment records for July 2026 and August 2026
         val payment1 = RentPaymentEntity(
             id = 1,
             tenantId = 1,
@@ -130,6 +129,7 @@ class DashboardModuleTest {
             roomNumber = "101",
             billingMonth = "August 2026",
             amount = 6000.0,
+            amountPaid = 0.0,
             dueDate = "2026-08-05",
             paymentDate = null,
             paymentMode = null,
@@ -166,18 +166,19 @@ class DashboardModuleTest {
         assertEquals(4, occupancyStats.vacantBeds)
         assertEquals(20.0, occupancyStats.bedOccupancyPercentage, 0.01)
 
-        // 6. Test Revenue Use Case logic
+        // 6. Test Revenue Use Case logic for July 2026
+        currentBillingMonthManager.setCurrentBillingMonth("July 2026")
         val revenueUseCase = RevenueUseCase(repository)
         val revenueStats = revenueUseCase().first()
         assertEquals(6000.0, revenueStats.monthlyRevenue, 0.01)
-        assertEquals(6000.0, revenueStats.pendingRent, 0.01)
+        assertEquals(0.0, revenueStats.pendingRent, 0.01)
 
-        // 7. Test Expenses Use Case logic
+        // 7. Test Expenses Use Case logic for July 2026
         val expensesUseCase = ExpensesUseCase(repository)
         val expensesStats = expensesUseCase().first()
         assertEquals(2500.0, expensesStats.totalExpenses, 0.01)
 
-        // 8. Test Profit Use Case logic
+        // 8. Test Profit Use Case logic for July 2026
         val profitUseCase = ProfitUseCase(repository)
         val profitStats = profitUseCase().first()
         assertEquals(3500.0, profitStats.netProfit, 0.01) // 6000 collected - 2500 expenses
@@ -191,12 +192,19 @@ class DashboardModuleTest {
         assertEquals("tenant_1", activities[2].id) // July 01 (oldest date)
 
         // 10. Test Dashboard Summary Use Case logic
+        val upcomingVacanciesUseCase = UpcomingVacanciesUseCase(repository)
         val dashboardSummaryUseCase = DashboardSummaryUseCase(
-            occupancyUseCase, revenueUseCase, expensesUseCase, profitUseCase, recentActivityUseCase
+            repository, recentActivityUseCase
         )
         val summary = dashboardSummaryUseCase().first()
         assertEquals(3500.0, summary.profit.netProfit, 0.01)
         assertEquals(3, summary.recentActivities.size)
+
+        // 11. Switch to August 2026 and verify reactive synchronization
+        currentBillingMonthManager.setCurrentBillingMonth("August 2026")
+        val augRevenueStats = revenueUseCase().first()
+        assertEquals(0.0, augRevenueStats.monthlyRevenue, 0.01)
+        assertEquals(6000.0, augRevenueStats.pendingRent, 0.01)
     }
 
     @Test
@@ -206,11 +214,12 @@ class DashboardModuleTest {
         val expensesUseCase = ExpensesUseCase(repository)
         val profitUseCase = ProfitUseCase(repository)
         val recentActivityUseCase = RecentActivityUseCase(repository)
+        val upcomingVacanciesUseCase = UpcomingVacanciesUseCase(repository)
         val dashboardSummaryUseCase = DashboardSummaryUseCase(
-            occupancyUseCase, revenueUseCase, expensesUseCase, profitUseCase, recentActivityUseCase
+            repository, recentActivityUseCase
         )
 
-        val viewModel = DashboardViewModel(dashboardSummaryUseCase)
+        val viewModel = DashboardViewModel(dashboardSummaryUseCase, currentBillingMonthManager)
         
         // Wait (suspends safely) until Room's background thread query emits and state transitions to Empty
         val state = viewModel.uiState.first { it is DashboardUiState.Empty }

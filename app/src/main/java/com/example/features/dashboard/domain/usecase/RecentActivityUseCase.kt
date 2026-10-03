@@ -14,10 +14,15 @@ enum class ActivityType {
 
 data class RecentActivity(
     val id: String,
-    val title: String,
-    val description: String,
     val date: String, // YYYY-MM-DD
-    val type: ActivityType
+    val type: ActivityType,
+    val param1: String = "", // e.g. tenantName
+    val param2: String = "", // e.g. roomNumber
+    val param3: String = "", // e.g. bedId or category
+    val amount: Double = 0.0,
+    val status: String = "",
+    val fallbackTitle: String = "",
+    val fallbackDescription: String = ""
 )
 
 class RecentActivityUseCase @Inject constructor(
@@ -36,10 +41,13 @@ class RecentActivityUseCase @Inject constructor(
                 activities.add(
                     RecentActivity(
                         id = "tenant_${tenant.id}",
-                        title = "Tenant Checked In",
-                        description = "${tenant.name} moved into Room ${tenant.roomNumber} (${tenant.bedId})",
                         date = tenant.moveInDate,
-                        type = ActivityType.TENANT_ADDED
+                        type = ActivityType.TENANT_ADDED,
+                        param1 = tenant.name,
+                        param2 = tenant.roomNumber,
+                        param3 = tenant.bedId,
+                        fallbackTitle = "Tenant Checked In",
+                        fallbackDescription = "${tenant.name} moved into Room ${tenant.roomNumber} (${tenant.bedId})"
                     )
                 )
             }
@@ -49,10 +57,14 @@ class RecentActivityUseCase @Inject constructor(
                 activities.add(
                     RecentActivity(
                         id = "payment_${payment.id}",
-                        title = if (payment.status == "Partial") "Rent Partially Paid" else "Rent Paid",
-                        description = "₹${String.format("%,.0f", payment.amountPaid)} collected from ${payment.tenantName} (Room ${payment.roomNumber})",
                         date = payment.paymentDate ?: payment.dueDate,
-                        type = ActivityType.RENT_PAID
+                        type = ActivityType.RENT_PAID,
+                        param1 = payment.tenantName,
+                        param2 = payment.roomNumber,
+                        amount = payment.amountPaid,
+                        status = payment.status,
+                        fallbackTitle = if (payment.status == "Partial") "Rent Partially Paid" else "Rent Paid",
+                        fallbackDescription = "₹${String.format("%,.0f", payment.amountPaid)} collected from ${payment.tenantName} (Room ${payment.roomNumber})"
                     )
                 )
             }
@@ -62,10 +74,13 @@ class RecentActivityUseCase @Inject constructor(
                 activities.add(
                     RecentActivity(
                         id = "expense_${expense.id}",
-                        title = "Expense Recorded",
-                        description = "₹${String.format("%,.0f", expense.amount)} for ${expense.category} - ${expense.notes}",
                         date = expense.date,
-                        type = ActivityType.EXPENSE_ADDED
+                        type = ActivityType.EXPENSE_ADDED,
+                        param1 = expense.category,
+                        param2 = expense.notes,
+                        amount = expense.amount,
+                        fallbackTitle = "Expense Recorded",
+                        fallbackDescription = "₹${String.format("%,.0f", expense.amount)} for ${expense.category} - ${expense.notes}"
                     )
                 )
             }

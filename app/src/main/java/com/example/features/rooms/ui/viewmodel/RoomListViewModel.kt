@@ -33,7 +33,12 @@ sealed interface RoomListUiState {
         val selectedFloor: String,
         val selectedRoomType: String,
         val selectedStatus: String,
-        val sortBy: String
+        val sortBy: String,
+        val totalCount: Int,
+        val availableCount: Int,
+        val fullCount: Int,
+        val partiallyOccupiedCount: Int,
+        val vacantCount: Int
     ) : RoomListUiState
     object Empty : RoomListUiState
 }
@@ -95,14 +100,26 @@ class RoomListViewModel @Inject constructor(
             val floors = listOf("All") + rooms.map { it.floor }.distinct().sorted()
             val types = listOf("All") + rooms.map { it.roomType }.distinct().sorted()
             
-            // Apply search
-            var processedRooms = searchRoomsUseCase(rooms, filters.searchQuery)
-            
-            // Apply filter
-            processedRooms = filterRoomsUseCase(
-                rooms = processedRooms,
-                floor = filters.selectedFloor,
-                roomType = filters.selectedRoomType,
+            // Base rooms after search + floor + roomType (for status counts)
+            var baseFiltered = searchRoomsUseCase(rooms, filters.searchQuery)
+            if (filters.selectedFloor != "All" && filters.selectedFloor.isNotBlank()) {
+                baseFiltered = baseFiltered.filter { it.floor == filters.selectedFloor }
+            }
+            if (filters.selectedRoomType != "All" && filters.selectedRoomType.isNotBlank()) {
+                baseFiltered = baseFiltered.filter { it.roomType == filters.selectedRoomType }
+            }
+
+            val totalCount = baseFiltered.size
+            val availableCount = baseFiltered.count { it.availableBeds > 0 }
+            val fullCount = baseFiltered.count { it.availableBeds == 0 && it.totalBeds > 0 }
+            val partiallyOccupiedCount = baseFiltered.count { it.occupiedBeds > 0 && it.availableBeds > 0 }
+            val vacantCount = baseFiltered.count { it.occupiedBeds == 0 }
+
+            // Apply status filter
+            var processedRooms = filterRoomsUseCase(
+                rooms = baseFiltered,
+                floor = "All",
+                roomType = "All",
                 occupancyStatus = filters.selectedStatus
             )
             
@@ -115,7 +132,7 @@ class RoomListViewModel @Inject constructor(
                 else -> processedRooms.sortedBy { it.roomNumber }
             }
             
-            val overall = occupancyCalculationUseCase(processedRooms)
+            val overall = occupancyCalculationUseCase(rooms) // overall across all rooms for summary card
             
             RoomListUiState.Success(
                 rooms = processedRooms,
@@ -126,7 +143,12 @@ class RoomListViewModel @Inject constructor(
                 selectedFloor = filters.selectedFloor,
                 selectedRoomType = filters.selectedRoomType,
                 selectedStatus = filters.selectedStatus,
-                sortBy = filters.sortBy
+                sortBy = filters.sortBy,
+                totalCount = totalCount,
+                availableCount = availableCount,
+                fullCount = fullCount,
+                partiallyOccupiedCount = partiallyOccupiedCount,
+                vacantCount = vacantCount
             )
         }
     }.stateIn(
@@ -153,6 +175,14 @@ class RoomListViewModel @Inject constructor(
 
     fun onSortByChanged(sort: String) {
         _sortBy.value = sort
+    }
+
+    fun resetFilters() {
+        _selectedFloor.value = "All"
+        _selectedRoomType.value = "All"
+        _selectedStatus.value = "All"
+        _sortBy.value = "Room Number"
+        _searchQuery.value = ""
     }
 
     fun deleteRoom(roomNumber: String) {
