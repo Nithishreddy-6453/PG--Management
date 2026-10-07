@@ -1,6 +1,7 @@
 package com.example.features.dashboard.domain.usecase
 
 import androidx.compose.runtime.Immutable
+import com.example.core.util.PgDateUtil
 import com.example.features.dashboard.data.DashboardRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -23,9 +24,15 @@ class UpcomingVacanciesUseCase @Inject constructor(
     private val repository: DashboardRepository
 ) {
     operator fun invoke(): Flow<List<UpcomingVacancyItem>> {
+        val todayStr = PgDateUtil.todayIso()
         return repository.getTenantsFlow().map { tenants ->
             tenants
-                .filter { !it.deleted && it.roomNumber.isNotBlank() && it.leavingDate.isNotBlank() }
+                .filter {
+                    !it.deleted &&
+                            it.roomNumber.isNotBlank() &&
+                            it.leavingDate.isNotBlank() &&
+                            PgDateUtil.isDateFuture(it.leavingDate, todayStr)
+                }
                 .sortedBy { it.leavingDate }
                 .map {
                     UpcomingVacancyItem(

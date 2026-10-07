@@ -41,19 +41,66 @@ class FirebaseAuthRepositoryImpl @Inject constructor(
     }
 
     override suspend fun signInWithEmail(email: String, password: String): Result<Unit> {
+        val sanitizedEmail = email.trim()
+        val sanitizedPassword = password.trim()
+        if (sanitizedEmail.isBlank()) {
+            return Result.failure(IllegalArgumentException("Email address cannot be empty."))
+        }
+        if (!android.util.Patterns.EMAIL_ADDRESS.matcher(sanitizedEmail).matches()) {
+            return Result.failure(IllegalArgumentException("Please enter a valid email address (e.g. user@example.com)."))
+        }
+        if (sanitizedPassword.isBlank()) {
+            return Result.failure(IllegalArgumentException("Password cannot be empty."))
+        }
         return try {
-            firebaseAuth.signInWithEmailAndPassword(email, password).await()
+            firebaseAuth.signInWithEmailAndPassword(sanitizedEmail, sanitizedPassword).await()
             Result.success(Unit)
+        } catch (e: FirebaseAuthInvalidCredentialsException) {
+            Log.e("FirebaseAuth", "Invalid credentials: ${e.message}")
+            Result.failure(Exception("Invalid email or password. Please verify and try again."))
+        } catch (e: FirebaseAuthException) {
+            Log.e("FirebaseAuth", "FirebaseAuthException [Code: ${e.errorCode}]: ${e.message}")
+            val msg = when (e.errorCode) {
+                "ERROR_INVALID_EMAIL" -> "The email address is badly formatted."
+                "ERROR_WRONG_PASSWORD" -> "Incorrect password. Please try again."
+                "ERROR_USER_NOT_FOUND" -> "No account found with this email. Please sign up first."
+                "ERROR_USER_DISABLED" -> "This user account has been disabled."
+                "ERROR_TOO_MANY_REQUESTS" -> "Too many failed attempts. Please try again later."
+                else -> e.message ?: "Authentication failed."
+            }
+            Result.failure(Exception(msg))
         } catch (e: Exception) {
+            Log.e("FirebaseAuth", "signInWithEmail failed: ${e.message}")
             Result.failure(e)
         }
     }
 
     override suspend fun signUpWithEmail(email: String, password: String): Result<Unit> {
+        val sanitizedEmail = email.trim()
+        val sanitizedPassword = password.trim()
+        if (sanitizedEmail.isBlank()) {
+            return Result.failure(IllegalArgumentException("Email address cannot be empty."))
+        }
+        if (!android.util.Patterns.EMAIL_ADDRESS.matcher(sanitizedEmail).matches()) {
+            return Result.failure(IllegalArgumentException("Please enter a valid email address (e.g. user@example.com)."))
+        }
+        if (sanitizedPassword.length < 6) {
+            return Result.failure(IllegalArgumentException("Password must be at least 6 characters long."))
+        }
         return try {
-            firebaseAuth.createUserWithEmailAndPassword(email, password).await()
+            firebaseAuth.createUserWithEmailAndPassword(sanitizedEmail, sanitizedPassword).await()
             Result.success(Unit)
+        } catch (e: FirebaseAuthException) {
+            Log.e("FirebaseAuth", "FirebaseAuthException [Code: ${e.errorCode}]: ${e.message}")
+            val msg = when (e.errorCode) {
+                "ERROR_EMAIL_ALREADY_IN_USE" -> "An account with this email already exists. Please sign in instead."
+                "ERROR_WEAK_PASSWORD" -> "Password is too weak. Please use at least 6 characters."
+                "ERROR_INVALID_EMAIL" -> "The email address is badly formatted."
+                else -> e.message ?: "Account registration failed."
+            }
+            Result.failure(Exception(msg))
         } catch (e: Exception) {
+            Log.e("FirebaseAuth", "signUpWithEmail failed: ${e.message}")
             Result.failure(e)
         }
     }

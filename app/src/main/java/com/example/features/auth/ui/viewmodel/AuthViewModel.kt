@@ -30,9 +30,24 @@ class AuthViewModel @Inject constructor(
     val authState: StateFlow<AuthState> = _authState.asStateFlow()
 
     fun signInWithEmail(email: String, password: String) {
+        val trimmedEmail = email.trim()
+        val trimmedPassword = password.trim()
+        if (trimmedEmail.isBlank()) {
+            _authState.value = AuthState.Error("Please enter your email address.")
+            return
+        }
+        if (!android.util.Patterns.EMAIL_ADDRESS.matcher(trimmedEmail).matches()) {
+            _authState.value = AuthState.Error("Please enter a valid email address (e.g. name@example.com).")
+            return
+        }
+        if (trimmedPassword.isBlank()) {
+            _authState.value = AuthState.Error("Please enter your password.")
+            return
+        }
+
         viewModelScope.launch {
             _authState.value = AuthState.Loading
-            val result = authRepository.signInWithEmail(email, password)
+            val result = authRepository.signInWithEmail(trimmedEmail, trimmedPassword)
             if (result.isSuccess) {
                 val uid = getCurrentUser()?.uid ?: "default_owner"
                 val signInResult = syncCoordinator?.handleUserSignIn(uid) ?: SignInResult.NewAccount
@@ -44,9 +59,24 @@ class AuthViewModel @Inject constructor(
     }
 
     fun signUpWithEmail(email: String, password: String) {
+        val trimmedEmail = email.trim()
+        val trimmedPassword = password.trim()
+        if (trimmedEmail.isBlank()) {
+            _authState.value = AuthState.Error("Please enter your email address.")
+            return
+        }
+        if (!android.util.Patterns.EMAIL_ADDRESS.matcher(trimmedEmail).matches()) {
+            _authState.value = AuthState.Error("Please enter a valid email address (e.g. name@example.com).")
+            return
+        }
+        if (trimmedPassword.length < 6) {
+            _authState.value = AuthState.Error("Password must be at least 6 characters long.")
+            return
+        }
+
         viewModelScope.launch {
             _authState.value = AuthState.Loading
-            val result = authRepository.signUpWithEmail(email, password)
+            val result = authRepository.signUpWithEmail(trimmedEmail, trimmedPassword)
             if (result.isSuccess) {
                 val uid = getCurrentUser()?.uid ?: "default_owner"
                 val signInResult = syncCoordinator?.handleUserSignIn(uid) ?: SignInResult.NewAccount

@@ -13,13 +13,14 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class EditRoomUiState(
     val roomNumber: String = "",
     val floor: String = "",
-    val capacity: String = "2",
+    val capacity: String = "",
     val ratePerBed: String = "6000",
     val roomType: String = "Non-AC",
     val notes: String = "",
@@ -51,13 +52,17 @@ class EditRoomViewModel @Inject constructor(
     fun loadRoom(roomNumber: String) {
         _uiState.value = _uiState.value.copy(isLoading = true, error = null)
         viewModelScope.launch {
-            val room = repository.getRoom(roomNumber)
+            val roomSummary = repository.getRoomSummaryFlow(roomNumber).first()
+            val room = roomSummary?.room ?: repository.getRoom(roomNumber)
+            val beds = roomSummary?.beds.orEmpty().ifEmpty { repository.getBedsForRoom(roomNumber) }
             val tenants = repository.getTenantsInRoom(roomNumber).filter { !it.deleted && it.roomNumber.isNotBlank() }
+            
             if (room != null) {
+                val actualStoredCapacity = if (beds.isNotEmpty()) maxOf(room.capacity, beds.size) else room.capacity
                 _uiState.value = EditRoomUiState(
                     roomNumber = room.roomNumber,
                     floor = room.floor,
-                    capacity = room.capacity.toString(),
+                    capacity = actualStoredCapacity.toString(),
                     ratePerBed = room.ratePerBed.toString(),
                     roomType = room.roomType,
                     notes = room.notes,
@@ -78,7 +83,12 @@ class EditRoomViewModel @Inject constructor(
     }
 
     fun onCapacityChanged(capacity: String) {
-        _uiState.value = _uiState.value.copy(capacity = capacity, error = null)
+        val capInt = capacity.toIntOrNull()
+        val activeCount = _uiState.value.activeTenantsCount
+        val errorMsg = if (capInt != null && capInt < activeCount) {
+            "Room ${_uiState.value.roomNumber} currently has $activeCount active tenants. Bed capacity cannot be less than $activeCount."
+        } else null
+        _uiState.value = _uiState.value.copy(capacity = capacity, error = errorMsg)
     }
 
     fun onRatePerBedChanged(rate: String) {
@@ -98,7 +108,14 @@ class EditRoomViewModel @Inject constructor(
         val capacityInt = state.capacity.toIntOrNull() ?: 0
         val rateDouble = state.ratePerBed.toDoubleOrNull() ?: -1.0
 
-        _uiState.value = state.copy(isSaving = true)
+        if (capacityInt < state.activeTenantsCount) {
+            _uiState.value = state.copy(
+                error = "Room ${state.roomNumber} currently has ${state.activeTenantsCount} active tenants. Bed capacity cannot be less than ${state.activeTenantsCount}."
+            )
+            return
+        }
+
+        _uiState.value = state.copy(isSaving = true, error = null)
         
         viewModelScope.launch {
             val result = updateRoomUseCase(
@@ -112,7 +129,7 @@ class EditRoomViewModel @Inject constructor(
             
             when (result) {
                 is RoomValidationResult.Success -> {
-                    _uiState.value = state.copy(isSaving = false)
+                    _uiState.value = _uiState.value.copy(isSaving = false)
                     _saveSuccessEvent.emit(Unit)
                 }
                 is RoomValidationResult.Error -> {

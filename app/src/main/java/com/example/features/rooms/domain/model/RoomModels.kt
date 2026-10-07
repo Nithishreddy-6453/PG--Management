@@ -1,48 +1,87 @@
 package com.example.features.rooms.domain.model
 
+import com.example.core.util.PgDateUtil
+import com.example.data.database.BedAssignmentEntity
+import com.example.data.database.BedEntity
 import com.example.data.database.RoomEntity
 import com.example.data.database.TenantEntity
-import com.example.data.database.BedEntity
-import com.example.data.database.BedAssignmentEntity
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 data class RoomSummary(
     val room: RoomEntity,
     val tenants: List<TenantEntity> = emptyList(),
     val beds: List<BedEntity> = emptyList(),
     val assignments: List<BedAssignmentEntity> = emptyList(),
-    val currentDateStr: String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+    val currentDateStr: String = PgDateUtil.todayIso()
 ) {
     val roomNumber: String get() = room.roomNumber
     val floor: String get() = room.floor
-    val totalBeds: Int get() = if (beds.isNotEmpty()) beds.size else room.capacity
+
+    // Canonical room capacity is strictly determined by room.capacity (never inflated by beds.size)
+    val totalBeds: Int get() = room.capacity
     val ratePerBed: Double get() = room.ratePerBed
     val roomType: String get() = room.roomType
     val notes: String get() = room.notes
     val isActive: Boolean get() = room.isActive
 
-    val blockedBeds: Int get() = beds.count { it.status == "BLOCKED" }
+    // Non-deleted physical beds belonging to this room
+    val roomBeds: List<BedEntity> get() = beds.filter { !it.deleted && it.roomNumber == room.roomNumber }
+
+    // Blocked beds count cannot exceed room capacity
+    val blockedBeds: Int get() = roomBeds.count { it.status == "BLOCKED" }.coerceAtMost(totalBeds)
     val usableBeds: Int get() = (totalBeds - blockedBeds).coerceAtLeast(0)
 
-    val activeAssignments: List<BedAssignmentEntity> get() = assignments.filter {
-        !it.deleted && (it.endDate == null || it.endDate > currentDateStr)
+    // Authoritative active assignments covering today on usable (non-blocked) beds
+    val activeAssignments: List<BedAssignmentEntity> get() {
+        val blockedBedIds = roomBeds.filter { it.status == "BLOCKED" }.map { it.bedId.lowercase() }.toSet()
+        val tenantMap = tenants.associateBy { it.id }
+
+        return assignments.filter { assign ->
+            if (assign.deleted || assign.roomNumber != room.roomNumber) return@filter false
+            if (blockedBedIds.contains(assign.bedId.lowercase())) return@filter false
+
+            // Start date must be started on or before today
+            if (assign.startDate.isNotBlank() && PgDateUtil.isDateFuture(assign.startDate, currentDateStr)) {
+                return@filter false
+            }
+
+            // End date must be null or strictly in the future
+            if (!assign.endDate.isNullOrBlank() && PgDateUtil.isDatePastOrToday(assign.endDate, currentDateStr)) {
+                return@filter false
+            }
+
+            // Associated tenant must not be deleted or vacated on or before today
+            val tenant = tenantMap[assign.tenantId]
+            if (tenant != null) {
+                if (tenant.deleted) return@filter false
+                if (tenant.roomNumber.isNotBlank() && tenant.roomNumber != room.roomNumber) return@filter false
+                if (tenant.leavingDate.isNotBlank() && PgDateUtil.isDatePastOrToday(tenant.leavingDate, currentDateStr)) {
+                    return@filter false
+                }
+            } else {
+                return@filter false
+            }
+            true
+        }
+        .distinctBy { it.bedId.lowercase() } // Max 1 active assignment per physical bed
+        .take(usableBeds) // Cannot exceed canonical usable beds
     }
 
+    // Active tenants strictly correspond to the valid active assignments
     val activeTenants: List<TenantEntity> get() {
         val activeTenantIds = activeAssignments.map { it.tenantId }.toSet()
-        return tenants.filter {
-            !it.deleted && (it.id in activeTenantIds || (it.roomNumber == room.roomNumber && (it.leavingDate.isBlank() || it.leavingDate > currentDateStr)))
-        }
+        return tenants.filter { it.id in activeTenantIds }
     }
-    
-    val leavingTenants: List<TenantEntity> get() = activeTenants.filter { it.leavingDate.isNotBlank() }
+
+    // Only future leaving dates count as upcoming vacancies
+    val leavingTenants: List<TenantEntity> get() = activeTenants.filter {
+        it.leavingDate.isNotBlank() && PgDateUtil.isDateFuture(it.leavingDate, currentDateStr)
+    }
+
     val hasUpcomingVacancy: Boolean get() = leavingTenants.isNotEmpty()
-    
-    val occupiedBeds: Int get() = activeAssignments.size.coerceAtMost(usableBeds)
+
+    val occupiedBeds: Int get() = activeAssignments.size
     val availableBeds: Int get() = (usableBeds - occupiedBeds).coerceAtLeast(0)
-    
+
     val activeTenantCount: Int get() = activeTenants.size
 
     val occupancyStatus: String get() = when {
@@ -50,7 +89,7 @@ data class RoomSummary(
         availableBeds == 0 && usableBeds > 0 -> "Full"
         else -> "Partially Occupied"
     }
-    
+
     val occupancyPercentage: Double get() = if (usableBeds > 0) {
         (occupiedBeds.toDouble() / usableBeds.toDouble()) * 100.0
     } else 0.0

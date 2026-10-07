@@ -112,12 +112,12 @@ class RoomRepositoryImpl @Inject constructor(
 
     override suspend fun getRoom(roomNumber: String): RoomEntity? {
         val propId = currentPropertyManager.getCurrentPropertyId()
-        return roomDao.getRoom(propId, roomNumber) ?: roomDao.getRoom(roomNumber)
+        return roomDao.getRoom(propId, roomNumber.trim())
     }
 
     override suspend fun getTenantsInRoom(roomNumber: String): List<TenantEntity> {
         val propId = currentPropertyManager.getCurrentPropertyId()
-        return tenantDao.getTenantsInRoom(propId, roomNumber).ifEmpty { tenantDao.getTenantsInRoom(roomNumber) }
+        return tenantDao.getTenantsInRoom(propId, roomNumber.trim())
     }
 
     override suspend fun getBedsForRoom(roomNumber: String): List<BedEntity> {

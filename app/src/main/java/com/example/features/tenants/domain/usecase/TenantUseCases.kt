@@ -476,11 +476,14 @@ class SearchTenantUseCase @Inject constructor() {
     ): List<TenantEntity> {
         var result = tenants
 
-        // 1. Query Search (Name or Phone)
+        // 1. Query Search (Name, Phone, Room, Bed)
         if (query.isNotBlank()) {
+            val q = query.trim()
             result = result.filter {
-                it.name.contains(query, ignoreCase = true) ||
-                        it.phone.contains(query)
+                it.name.contains(q, ignoreCase = true) ||
+                        it.phone.contains(q, ignoreCase = true) ||
+                        it.roomNumber.contains(q, ignoreCase = true) ||
+                        it.bedId.contains(q, ignoreCase = true)
             }
         }
 
@@ -490,22 +493,40 @@ class SearchTenantUseCase @Inject constructor() {
         }
 
         // 3. Occupancy Filter
-        if (occupancyFilter == "Active") {
-            result = result.filter { it.roomNumber.isNotBlank() && !it.deleted }
-        } else if (occupancyFilter == "Vacated") {
-            result = result.filter { it.roomNumber.isBlank() || it.deleted }
-        } else if (occupancyFilter == "Leaving Soon" || occupancyFilter == "Leaving") {
-            result = result.filter { it.roomNumber.isNotBlank() && !it.deleted && it.leavingDate.isNotBlank() }
+        when (occupancyFilter) {
+            "Active" -> {
+                result = result.filter { it.roomNumber.isNotBlank() && !it.deleted }
+            }
+            "Leaving Soon", "Leaving" -> {
+                result = result.filter { it.roomNumber.isNotBlank() && !it.deleted && it.leavingDate.isNotBlank() }
+            }
+            "Vacated" -> {
+                result = result.filter { it.roomNumber.isBlank() || it.deleted }
+            }
+            "New" -> {
+                result = result.filter {
+                    it.roomNumber.isNotBlank() && !it.deleted && isRecentMoveIn(it.moveInDate)
+                }
+            }
         }
 
         // 4. Sorting
         result = when (sortBy) {
-            "Alphabetical" -> result.sortedBy { it.name.lowercase() }
-            "Move-in Date" -> result.sortedByDescending { it.moveInDate }
+            "Name", "Alphabetical" -> result.sortedBy { it.name.lowercase() }
+            "Move-in Date", "Joined Date" -> result.sortedByDescending { it.moveInDate }
+            "Room" -> result.sortedWith(compareBy({ it.roomNumber }, { it.bedId }))
             "Leaving Date" -> result.sortedBy { if (it.leavingDate.isBlank()) "9999-99-99" else it.leavingDate }
-            else -> result
+            else -> result.sortedBy { it.name.lowercase() }
         }
 
         return result
+    }
+
+    private fun isRecentMoveIn(moveInDate: String?): Boolean {
+        if (moveInDate.isNullOrBlank()) return false
+        val d = com.example.core.util.PgDateUtil.parseDate(moveInDate) ?: return false
+        val cal = java.util.Calendar.getInstance()
+        cal.add(java.util.Calendar.DAY_OF_YEAR, -30)
+        return d.after(cal.time)
     }
 }

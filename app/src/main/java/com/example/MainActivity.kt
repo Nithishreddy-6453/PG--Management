@@ -295,7 +295,9 @@ class MainActivity : ComponentActivity() {
                             com.example.features.rooms.ui.RoomDetailsScreen(
                                 viewModel = hiltViewModel(),
                                 onBackClick = { navController.popBackStack() },
-                                onEditRoomClick = { id -> navController.navigate(Screen.EditRoom.createRoute(id)) }
+                                onEditRoomClick = { id -> navController.navigate(Screen.EditRoom.createRoute(id)) },
+                                onTenantClick = { id -> navController.navigate(Screen.TenantDetails.createRoute(id)) },
+                                onCollectRentClick = { navController.navigate(Screen.RentLedger.route) }
                             )
                         }
 

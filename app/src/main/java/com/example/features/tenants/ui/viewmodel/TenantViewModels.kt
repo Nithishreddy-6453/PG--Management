@@ -36,8 +36,14 @@ sealed interface TenantListUiState {
         val roomsList: List<String>,
         val searchQuery: String = "",
         val selectedRoomFilter: String = "All",
-        val selectedOccupancyFilter: String = "Active",
-        val sortBy: String = "Alphabetical"
+        val selectedOccupancyFilter: String = "All",
+        val sortBy: String = "Name",
+        val totalCount: Int = 0,
+        val activeCount: Int = 0,
+        val leavingSoonCount: Int = 0,
+        val vacatedCount: Int = 0,
+        val newCount: Int = 0,
+        val pendingSubmissionsCount: Int = 0
     ) : TenantListUiState
 }
 
@@ -45,19 +51,20 @@ sealed interface TenantListUiState {
 class TenantListViewModel @Inject constructor(
     private val getTenantsUseCase: GetTenantsUseCase,
     private val searchTenantUseCase: SearchTenantUseCase,
-    private val repository: TenantRepository
+    private val repository: TenantRepository,
+    private val getPendingCountUseCase: com.example.features.googleform.domain.usecase.GetPendingCountUseCase
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
     private val _roomFilter = MutableStateFlow("All")
-    private val _occupancyFilter = MutableStateFlow("Active")
-    private val _sortBy = MutableStateFlow("Alphabetical")
+    private val _occupancyFilter = MutableStateFlow("All")
+    private val _sortBy = MutableStateFlow("Name")
 
     private data class TenantFilterState(
         val query: String = "",
         val room: String = "All",
-        val occupancy: String = "Active",
-        val sort: String = "Alphabetical"
+        val occupancy: String = "All",
+        val sort: String = "Name"
     )
 
     private val filterState = combine(
@@ -69,29 +76,51 @@ class TenantListViewModel @Inject constructor(
         TenantFilterState(query, room, occupancy, sort)
     }
 
+    private val pendingCountFlow: Flow<Int> = flow {
+        val propId = repository.getCurrentPropertyId()
+        emitAll(getPendingCountUseCase(propId))
+    }
+
     val uiState: StateFlow<TenantListUiState> = combine(
         getTenantsUseCase.execute(),
         repository.getAllRoomsFlow(),
+        pendingCountFlow.onStart { emit(0) },
         filterState
-    ) { tenants, rooms, filter ->
-        if (tenants.isEmpty()) {
+    ) { tenants, rooms, pendingCount, filter ->
+        if (tenants.isEmpty() && pendingCount == 0) {
             TenantListUiState.Empty
         } else {
             val filteredList = searchTenantUseCase(tenants, filter.query, filter.room, filter.occupancy, filter.sort)
-            val uniqueRooms = rooms.map { it.roomNumber }
-            
-            if (filteredList.isEmpty() && filter.query.isBlank() && filter.room == "All" && filter.occupancy == "All") {
-                TenantListUiState.Empty
-            } else {
-                TenantListUiState.Success(
-                    tenants = filteredList,
-                    roomsList = uniqueRooms,
-                    searchQuery = filter.query,
-                    selectedRoomFilter = filter.room,
-                    selectedOccupancyFilter = filter.occupancy,
-                    sortBy = filter.sort
-                )
+            val uniqueRooms = rooms.map { it.roomNumber }.sorted()
+
+            fun isRecentMoveIn(moveInDate: String?): Boolean {
+                if (moveInDate.isNullOrBlank()) return false
+                val d = com.example.core.util.PgDateUtil.parseDate(moveInDate) ?: return false
+                val cal = java.util.Calendar.getInstance()
+                cal.add(java.util.Calendar.DAY_OF_YEAR, -30)
+                return d.after(cal.time)
             }
+
+            val totalCount = tenants.size
+            val activeCount = tenants.count { it.roomNumber.isNotBlank() && !it.deleted }
+            val leavingSoonCount = tenants.count { it.roomNumber.isNotBlank() && !it.deleted && it.leavingDate.isNotBlank() }
+            val vacatedCount = tenants.count { it.roomNumber.isBlank() || it.deleted }
+            val newCount = tenants.count { it.roomNumber.isNotBlank() && !it.deleted && isRecentMoveIn(it.moveInDate) }
+
+            TenantListUiState.Success(
+                tenants = filteredList,
+                roomsList = uniqueRooms,
+                searchQuery = filter.query,
+                selectedRoomFilter = filter.room,
+                selectedOccupancyFilter = filter.occupancy,
+                sortBy = filter.sort,
+                totalCount = totalCount,
+                activeCount = activeCount,
+                leavingSoonCount = leavingSoonCount,
+                vacatedCount = vacatedCount,
+                newCount = newCount,
+                pendingSubmissionsCount = pendingCount
+            )
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TenantListUiState.Loading)
 

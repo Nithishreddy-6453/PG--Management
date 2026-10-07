@@ -1,11 +1,9 @@
 package com.example.core.integrity
 
 import com.example.core.common.PgLogger
+import com.example.core.util.PgDateUtil
 import com.example.data.database.*
 import com.example.data.sync.SyncCoordinator
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -20,13 +18,12 @@ class DataIntegrityManager @Inject constructor(
     private val logger: PgLogger,
     private val syncCoordinator: SyncCoordinator? = null
 ) {
-    private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
 
     /**
      * Performs a comprehensive read-only consistency scan across Rooms, Beds, BedAssignments, and Tenants.
      */
     suspend fun performScan(targetPropertyId: String? = null, todayDateOverride: String? = null): IntegrityScanReport {
-        val todayStr = todayDateOverride ?: dateFormat.format(Date())
+        val todayStr = todayDateOverride ?: PgDateUtil.todayIso()
         logger.i(TAG, "Starting Data Integrity Scan for property: ${targetPropertyId ?: "ALL"}")
 
         val properties = if (!targetPropertyId.isNullOrBlank()) {
@@ -61,16 +58,18 @@ class DataIntegrityManager @Inject constructor(
 
         val issues = mutableListOf<IntegrityIssue>()
 
-        // 1. Scan Rooms vs Beds
+        // 1. Scan Rooms vs Beds & Canonical Capacity
         for (room in allRooms) {
             val roomBeds = allBeds.filter { it.propertyId == room.propertyId && it.roomNumber == room.roomNumber && !it.deleted }
-            if (roomBeds.size < room.capacity) {
+            
+            // Check if bed records differ from room capacity
+            if (roomBeds.size != room.capacity) {
                 issues.add(
                     IntegrityIssue(
                         type = IntegrityIssueType.MISSING_PHYSICAL_BEDS_IN_ROOM,
                         propertyId = room.propertyId,
                         roomNumber = room.roomNumber,
-                        description = "Room ${room.roomNumber} has capacity ${room.capacity} but only ${roomBeds.size} bed entities configured."
+                        description = "Room ${room.roomNumber} has canonical capacity ${room.capacity} but ${roomBeds.size} bed entities exist."
                     )
                 )
             }
@@ -79,18 +78,17 @@ class DataIntegrityManager @Inject constructor(
                 it.propertyId == room.propertyId &&
                         it.roomNumber == room.roomNumber &&
                         !it.deleted &&
-                        (it.leavingDate.isBlank() || it.leavingDate > todayStr)
+                        (it.leavingDate.isBlank() || PgDateUtil.isDateFuture(it.leavingDate, todayStr))
             }
 
-            // Case J: More active tenants than room capacity
-            val usableBedsCount = roomBeds.count { it.status != "BLOCKED" }.coerceAtLeast(room.capacity)
+            val usableBedsCount = (room.capacity - roomBeds.count { it.status == "BLOCKED" }).coerceAtLeast(0)
             if (activeRoomTenants.size > usableBedsCount) {
                 issues.add(
                     IntegrityIssue(
                         type = IntegrityIssueType.J_MORE_TENANTS_THAN_CAPACITY,
                         propertyId = room.propertyId,
                         roomNumber = room.roomNumber,
-                        description = "Room ${room.roomNumber} OVER CAPACITY: ${activeRoomTenants.size} active tenants for capacity $usableBedsCount.",
+                        description = "Room ${room.roomNumber} OVER CAPACITY: ${activeRoomTenants.size} active tenants for canonical usable capacity $usableBedsCount.",
                         details = "Tenants: ${activeRoomTenants.joinToString { "${it.name} (id:${it.id})" }}"
                     )
                 )
@@ -102,13 +100,15 @@ class DataIntegrityManager @Inject constructor(
         for (tenant in allTenants) {
             val isTenantActive = !tenant.deleted &&
                     tenant.roomNumber.isNotBlank() &&
-                    (tenant.leavingDate.isBlank() || tenant.leavingDate > todayStr)
+                    (tenant.leavingDate.isBlank() || PgDateUtil.isDateFuture(tenant.leavingDate, todayStr))
 
             val tenantAssignments = allAssignments.filter { it.tenantId == tenant.id && !it.deleted }
-            val activeAssignments = tenantAssignments.filter { it.endDate == null || it.endDate > todayStr }
+            val activeAssignments = tenantAssignments.filter {
+                (it.startDate.isBlank() || !PgDateUtil.isDateFuture(it.startDate, todayStr)) &&
+                        (it.endDate.isNullOrBlank() || PgDateUtil.isDateFuture(it.endDate, todayStr))
+            }
 
             if (isTenantActive) {
-                // Case A: Active tenant has room but no active bed assignment
                 if (activeAssignments.isEmpty()) {
                     issues.add(
                         IntegrityIssue(
@@ -118,12 +118,11 @@ class DataIntegrityManager @Inject constructor(
                             tenantId = tenant.id,
                             tenantName = tenant.name,
                             bedId = tenant.bedId,
-                            description = "Active tenant '${tenant.name}' assigned to Room ${tenant.roomNumber} has no active BedAssignmentEntity."
+                            description = "Active tenant '${tenant.name}' in Room ${tenant.roomNumber} has no active BedAssignmentEntity."
                         )
                     )
                 } else if (activeAssignments.size == 1) {
                     val assignment = activeAssignments.first()
-                    // Case S: Current room/bed on TenantEntity disagrees with active assignment
                     if (assignment.roomNumber != tenant.roomNumber || assignment.bedId != tenant.bedId) {
                         issues.add(
                             IntegrityIssue(
@@ -134,11 +133,10 @@ class DataIntegrityManager @Inject constructor(
                                 tenantName = tenant.name,
                                 bedId = tenant.bedId,
                                 assignmentId = assignment.assignmentId,
-                                description = "Tenant record (${tenant.roomNumber}/${tenant.bedId}) does not match active assignment (${assignment.roomNumber}/${assignment.bedId})."
+                                description = "Tenant record (${tenant.roomNumber}/${tenant.bedId}) does not match assignment (${assignment.roomNumber}/${assignment.bedId})."
                             )
                         )
                     }
-                    // Case F: Property ID mismatch
                     if (assignment.propertyId.isNotBlank() && tenant.propertyId.isNotBlank() && assignment.propertyId != tenant.propertyId) {
                         issues.add(
                             IntegrityIssue(
@@ -153,7 +151,6 @@ class DataIntegrityManager @Inject constructor(
                         )
                     }
                 } else {
-                    // Case L: Same tenant assigned to multiple active beds
                     issues.add(
                         IntegrityIssue(
                             type = IntegrityIssueType.L_TENANT_MULTIPLE_ACTIVE_BEDS,
@@ -167,8 +164,7 @@ class DataIntegrityManager @Inject constructor(
                     )
                 }
             } else {
-                // Tenant is vacated/deleted/empty room
-                // Case Q: Tenant marked vacated while an active bed assignment remains
+                // Tenant is vacated or deleted
                 for (activeAssign in activeAssignments) {
                     issues.add(
                         IntegrityIssue(
@@ -185,10 +181,10 @@ class DataIntegrityManager @Inject constructor(
                 }
             }
 
-            // Case R: Active assignment after leaving date
-            if (tenant.leavingDate.isNotBlank() && tenant.leavingDate <= todayStr) {
+            // Lingering past leaving date
+            if (tenant.leavingDate.isNotBlank() && PgDateUtil.isDatePastOrToday(tenant.leavingDate, todayStr)) {
                 for (assign in activeAssignments) {
-                    if (assign.endDate == null || assign.endDate > tenant.leavingDate) {
+                    if (assign.endDate == null || PgDateUtil.isDateAfter(assign.endDate, tenant.leavingDate)) {
                         issues.add(
                             IntegrityIssue(
                                 type = IntegrityIssueType.R_ASSIGNMENT_PAST_LEAVING_DATE,
@@ -207,11 +203,14 @@ class DataIntegrityManager @Inject constructor(
 
         // 3. Scan BedAssignments vs Beds & Tenants
         val activeAssignmentsGroupedByBed = allAssignments
-            .filter { !it.deleted && (it.endDate == null || it.endDate > todayStr) }
-            .groupBy { "${it.propertyId}#${it.roomNumber}#${it.bedId}" }
+            .filter {
+                !it.deleted &&
+                        (it.startDate.isBlank() || !PgDateUtil.isDateFuture(it.startDate, todayStr)) &&
+                        (it.endDate == null || PgDateUtil.isDateFuture(it.endDate, todayStr))
+            }
+            .groupBy { "${it.propertyId}#${it.roomNumber}#${it.bedId.lowercase()}" }
 
-        for ((bedKey, assignments) in activeAssignmentsGroupedByBed) {
-            // Case K: Duplicate active assignments on same bed
+        for ((_, assignments) in activeAssignmentsGroupedByBed) {
             if (assignments.size > 1) {
                 val sample = assignments.first()
                 issues.add(
@@ -228,7 +227,6 @@ class DataIntegrityManager @Inject constructor(
         }
 
         for (assign in allAssignments.filter { !it.deleted }) {
-            // Case C: Assignment pointing to missing tenant
             val tenant = tenantMap[assign.tenantId]
             if (tenant == null) {
                 issues.add(
@@ -244,9 +242,8 @@ class DataIntegrityManager @Inject constructor(
                 )
             }
 
-            // Case D: Assignment pointing to missing bed
             val matchingBed = allBeds.firstOrNull {
-                it.propertyId == assign.propertyId && it.roomNumber == assign.roomNumber && it.bedId == assign.bedId && !it.deleted
+                it.propertyId == assign.propertyId && it.roomNumber == assign.roomNumber && it.bedId.equals(assign.bedId, ignoreCase = true) && !it.deleted
             }
             if (matchingBed == null) {
                 issues.add(
@@ -260,8 +257,7 @@ class DataIntegrityManager @Inject constructor(
                         description = "Bed assignment points to missing bed '${assign.bedId}' in Room ${assign.roomNumber}."
                     )
                 )
-            } else if (matchingBed.status == "BLOCKED" && (assign.endDate == null || assign.endDate > todayStr)) {
-                // Case O: Blocked bed occupied
+            } else if (matchingBed.status == "BLOCKED" && (assign.endDate == null || PgDateUtil.isDateFuture(assign.endDate, todayStr))) {
                 issues.add(
                     IntegrityIssue(
                         type = IntegrityIssueType.O_BLOCKED_BED_OCCUPIED,
@@ -278,11 +274,10 @@ class DataIntegrityManager @Inject constructor(
 
         // 4. Scan Beds vs Active Assignments
         for (bed in allBeds.filter { !it.deleted }) {
-            val key = "${bed.propertyId}#${bed.roomNumber}#${bed.bedId}"
+            val key = "${bed.propertyId}#${bed.roomNumber}#${bed.bedId.lowercase()}"
             val activeAssigns = activeAssignmentsGroupedByBed[key].orEmpty()
 
             if (bed.status == "OCCUPIED" && activeAssigns.isEmpty()) {
-                // Case G: Bed marked OCCUPIED but no active assignment
                 issues.add(
                     IntegrityIssue(
                         type = IntegrityIssueType.G_BED_OCCUPIED_WITHOUT_ASSIGNMENT,
@@ -293,14 +288,13 @@ class DataIntegrityManager @Inject constructor(
                     )
                 )
             } else if (bed.status == "AVAILABLE" && activeAssigns.isNotEmpty()) {
-                // Case H: Bed marked AVAILABLE but has active assignment
                 issues.add(
                     IntegrityIssue(
                         type = IntegrityIssueType.H_BED_AVAILABLE_WITH_ACTIVE_ASSIGNMENT,
                         propertyId = bed.propertyId,
                         roomNumber = bed.roomNumber,
                         bedId = bed.bedId,
-                        description = "Bed '${bed.bedId}' in Room ${bed.roomNumber} is marked AVAILABLE but has ${activeAssigns.size} active assignment(s)."
+                        description = "Bed '${bed.bedId}' in Room ${bed.roomNumber} is marked AVAILABLE but has active assignment."
                     )
                 )
             }
@@ -319,11 +313,12 @@ class DataIntegrityManager @Inject constructor(
 
     /**
      * Executes safe, deterministic, conservative repairs to synchronize
-     * TENANT ↕ BED ASSIGNMENT ↕ BED ↕ ROOM.
-     * Never invents arbitrary data or destroys ambiguous multi-tenant associations.
+     * ROOM -> USABLE BEDS -> ACTIVE BED ASSIGNMENTS -> TENANTS.
+     * Prevents bed count exceeding room capacity, closes expired assignments,
+     * resolves duplicate beds, and maintains strict property isolation.
      */
     suspend fun performSafeRepair(targetPropertyId: String? = null, todayDateOverride: String? = null): IntegrityRepairReport {
-        val todayStr = todayDateOverride ?: dateFormat.format(Date())
+        val todayStr = todayDateOverride ?: PgDateUtil.todayIso()
         logger.i(TAG, "Starting Safe Data Integrity Repair for property: ${targetPropertyId ?: "ALL"}")
 
         val scanReport = performScan(targetPropertyId, todayStr)
@@ -338,76 +333,43 @@ class DataIntegrityManager @Inject constructor(
 
         val defaultPropId = properties.firstOrNull()?.propertyId ?: "property_default"
 
-        // PHASE 1: Ensure all rooms have valid physical BedEntity records up to their capacity
         val allRooms = if (!targetPropertyId.isNullOrBlank()) {
             roomDao.getAllRooms(targetPropertyId)
         } else {
             roomDao.getAllRooms()
         }
 
-        for (room in allRooms) {
-            val propId = if (room.propertyId.isNotBlank() && room.propertyId != "property_default") room.propertyId else defaultPropId
-            val existingBeds = bedDao.getBedsForRoom(propId, room.roomNumber).filter { !it.deleted }
-            val existingBedIds = existingBeds.map { it.bedId }.toSet()
-
-            // 1.1 Ensure standard "Bed 1", "Bed 2" up to capacity exist
-            for (i in 1..maxOf(1, room.capacity)) {
-                val standardBedId = "Bed $i"
-                val alternateBedId = "Bed " + ('A' + (i - 1))
-                if (!existingBedIds.contains(standardBedId) && !existingBedIds.contains(alternateBedId)) {
-                    val newBed = BedEntity(
-                        roomNumber = room.roomNumber,
-                        bedId = standardBedId,
-                        status = "AVAILABLE",
-                        propertyId = propId,
-                        createdAt = System.currentTimeMillis(),
-                        updatedAt = System.currentTimeMillis(),
-                        syncStatus = "PENDING_UPLOAD"
-                    )
-                    bedDao.insertBed(newBed)
-                    repairLogs.add(
-                        RepairActionLog(
-                            propertyId = propId,
-                            roomNumber = room.roomNumber,
-                            bedId = standardBedId,
-                            previousState = "Missing BedEntity",
-                            repairedState = "Created BedEntity(status=AVAILABLE)",
-                            reason = "Initialized missing physical bed for room capacity (${room.capacity})",
-                            action = ResolutionAction.AUTOMATICALLY_REPAIRED
-                        )
-                    )
-                }
-            }
-        }
-
-        // Refresh all beds and assignments after bed initialization
-        val allBeds = if (!targetPropertyId.isNullOrBlank()) {
-            bedDao.getAllBedsForProperty(targetPropertyId)
-        } else {
-            properties.flatMap { bedDao.getAllBedsForProperty(it.propertyId) }
-        }
-
-        val allTenants = if (!targetPropertyId.isNullOrBlank()) {
+        val allTenantsInitial = if (!targetPropertyId.isNullOrBlank()) {
             tenantDao.getAllTenants(targetPropertyId)
         } else {
             tenantDao.getAllTenants()
         }
 
-        val allAssignments = if (!targetPropertyId.isNullOrBlank()) {
+        val allAssignmentsInitial = if (!targetPropertyId.isNullOrBlank()) {
             bedAssignmentDao.getAllAssignments(targetPropertyId)
         } else {
             properties.flatMap { bedAssignmentDao.getAllAssignments(it.propertyId) }
         }
 
-        // PHASE 2: Close active assignments for vacated/deleted tenants (Case Q, R)
-        for (tenant in allTenants) {
-            val isVacated = tenant.deleted || tenant.roomNumber.isBlank() || (tenant.leavingDate.isNotBlank() && tenant.leavingDate <= todayStr)
+        // ====================================================================
+        // PHASE 1: CLOSE PAST/EXPIRED TENANT VACANCIES (Case Q, R)
+        // ====================================================================
+        for (tenant in allTenantsInitial) {
+            val isLeavingDatePast = tenant.leavingDate.isNotBlank() && PgDateUtil.isDatePastOrToday(tenant.leavingDate, todayStr)
+            val isVacated = tenant.deleted || tenant.roomNumber.isBlank() || isLeavingDatePast
+
             if (isVacated) {
-                val activeAssignments = allAssignments.filter {
-                    it.tenantId == tenant.id && !it.deleted && (it.endDate == null || it.endDate > todayStr)
+                val effectiveEnd = if (tenant.leavingDate.isNotBlank()) {
+                    PgDateUtil.normalizeDate(tenant.leavingDate) ?: todayStr
+                } else todayStr
+
+                // Close all active assignments for this vacated tenant
+                val tenantActiveAssignments = allAssignmentsInitial.filter {
+                    it.tenantId == tenant.id && !it.deleted &&
+                            (it.endDate.isNullOrBlank() || PgDateUtil.isDateFuture(it.endDate, todayStr) || PgDateUtil.isDateAfter(it.endDate, effectiveEnd))
                 }
-                for (assignment in activeAssignments) {
-                    val effectiveEnd = if (tenant.leavingDate.isNotBlank()) tenant.leavingDate else todayStr
+
+                for (assignment in tenantActiveAssignments) {
                     val updatedAssign = assignment.copy(
                         endDate = effectiveEnd,
                         updatedAt = System.currentTimeMillis(),
@@ -425,7 +387,45 @@ class DataIntegrityManager @Inject constructor(
                             bedId = assignment.bedId,
                             previousState = "Active BedAssignment (endDate=${assignment.endDate})",
                             repairedState = "Closed BedAssignment (endDate=$effectiveEnd)",
-                            reason = "Tenant '${tenant.name}' is vacated; closed lingering active assignment.",
+                            reason = "Tenant '${tenant.name}' leaving date ($effectiveEnd) has passed; finalized vacation.",
+                            action = ResolutionAction.AUTOMATICALLY_REPAIRED
+                        )
+                    )
+                }
+
+                // If tenant's roomNumber/bedId is still active on TenantEntity, clear them
+                if (tenant.roomNumber.isNotBlank() || tenant.bedId.isNotBlank()) {
+                    val previousRoom = tenant.roomNumber
+                    val previousBed = tenant.bedId
+                    val vacatedNotes = if (tenant.notes.contains("Vacated")) {
+                        tenant.notes
+                    } else if (previousRoom.isNotBlank() && previousBed.isNotBlank()) {
+                        "${tenant.notes}\n[Vacated from Room $previousRoom $previousBed on $effectiveEnd]".trim()
+                    } else {
+                        "${tenant.notes}\n[Vacated on $effectiveEnd]".trim()
+                    }
+
+                    val updatedTenant = tenant.copy(
+                        roomNumber = "",
+                        bedId = "",
+                        leavingDate = effectiveEnd,
+                        notes = vacatedNotes,
+                        updatedAt = System.currentTimeMillis(),
+                        syncStatus = "PENDING_UPLOAD"
+                    )
+                    tenantDao.updateTenant(updatedTenant)
+                    syncCoordinator?.enqueueOperation("TENANT", tenant.id.toString(), "UPDATE")
+
+                    repairLogs.add(
+                        RepairActionLog(
+                            propertyId = tenant.propertyId,
+                            roomNumber = previousRoom,
+                            tenantId = tenant.id,
+                            tenantName = tenant.name,
+                            bedId = previousBed,
+                            previousState = "Tenant record held room=$previousRoom bed=$previousBed past leaving date",
+                            repairedState = "Cleared room and bed references on vacated tenant",
+                            reason = "Finalized vacated tenant state for '${tenant.name}' past leaving date $effectiveEnd",
                             action = ResolutionAction.AUTOMATICALLY_REPAIRED
                         )
                     )
@@ -433,72 +433,270 @@ class DataIntegrityManager @Inject constructor(
             }
         }
 
-        // PHASE 3: Reconcile Active Tenants with Beds and BedAssignments (Case A, B, S)
-        val activeTenants = allTenants.filter {
-            !it.deleted && it.roomNumber.isNotBlank() && (it.leavingDate.isBlank() || it.leavingDate > todayStr)
+        // ====================================================================
+        // PHASE 2: CANONICALIZE PHYSICAL BEDS PER ROOM (Strict BedEntity cleanup)
+        // ====================================================================
+        // Refresh tenants after Phase 1 vacate cleanup
+        val allTenantsPostVacate = if (!targetPropertyId.isNullOrBlank()) {
+            tenantDao.getAllTenants(targetPropertyId)
+        } else {
+            tenantDao.getAllTenants()
         }
 
-        // Re-query assignments after Phase 2
-        val currentAssignments = if (!targetPropertyId.isNullOrBlank()) {
+        for (room in allRooms) {
+            val propId = if (room.propertyId.isNotBlank() && room.propertyId != "property_default") room.propertyId else defaultPropId
+            val existingBeds = bedDao.getBedsForRoom(propId, room.roomNumber).filter { !it.deleted }
+            val activeTenantsInRoom = allTenantsPostVacate.filter {
+                it.propertyId == propId &&
+                        it.roomNumber == room.roomNumber &&
+                        !it.deleted &&
+                        (it.leavingDate.isBlank() || PgDateUtil.isDateFuture(it.leavingDate, todayStr))
+            }
+
+            val referencedBedIds = activeTenantsInRoom.map { it.bedId.trim() }.filter { it.isNotBlank() }.toSet()
+
+            // Detect naming convention used in room: letter-based (Bed A) or number-based (Bed 1)
+            val usesLetters = referencedBedIds.any { it.matches(Regex("(?i)Bed\\s*[A-Z]")) } ||
+                    existingBeds.any { it.bedId.matches(Regex("(?i)Bed\\s*[A-Z]")) }
+
+            // 2.1 Prune redundant orphaned beds if existing beds exceed canonical room.capacity
+            if (existingBeds.size > room.capacity) {
+                // Determine which beds to keep:
+                // First keep beds referenced by active tenants
+                val bedsToKeep = mutableListOf<BedEntity>()
+                val excessBeds = mutableListOf<BedEntity>()
+
+                for (bed in existingBeds) {
+                    if (referencedBedIds.any { it.equals(bed.bedId, ignoreCase = true) } || bed.status == "BLOCKED") {
+                        if (bedsToKeep.size < room.capacity) {
+                            bedsToKeep.add(bed)
+                        } else {
+                            excessBeds.add(bed)
+                        }
+                    } else {
+                        excessBeds.add(bed)
+                    }
+                }
+
+                // If still need more beds to reach room.capacity, pick from unassigned excess
+                for (bed in excessBeds.toList()) {
+                    if (bedsToKeep.size < room.capacity && bed.status != "BLOCKED") {
+                        bedsToKeep.add(bed)
+                        excessBeds.remove(bed)
+                    }
+                }
+
+                // Delete all leftover excess beds
+                for (excess in excessBeds) {
+                    bedDao.deleteBed(propId, room.roomNumber, excess.bedId)
+                    syncCoordinator?.enqueueOperation("BED", "${propId}_${room.roomNumber}_${excess.bedId}", "DELETE")
+
+                    repairLogs.add(
+                        RepairActionLog(
+                            propertyId = propId,
+                            roomNumber = room.roomNumber,
+                            bedId = excess.bedId,
+                            previousState = "Redundant BedEntity (${excess.bedId}) beyond capacity ${room.capacity}",
+                            repairedState = "Deleted redundant BedEntity",
+                            reason = "Enforced canonical room capacity (${room.capacity}); removed orphaned bed duplicate",
+                            action = ResolutionAction.AUTOMATICALLY_REPAIRED
+                        )
+                    )
+                }
+            }
+
+            // 2.2 Re-query non-deleted beds for room
+            val updatedBeds = bedDao.getBedsForRoom(propId, room.roomNumber).filter { !it.deleted }
+            val updatedBedIds = updatedBeds.map { it.bedId.lowercase() }.toSet()
+
+            // 2.3 If room has fewer beds than room.capacity, create missing beds up to room.capacity
+            var currentCount = updatedBeds.size
+            var index = 1
+            while (currentCount < room.capacity) {
+                val candidateBedId = if (usesLetters) "Bed " + ('A' + (index - 1)) else "Bed $index"
+                if (!updatedBedIds.contains(candidateBedId.lowercase())) {
+                    val newBed = BedEntity(
+                        roomNumber = room.roomNumber,
+                        bedId = candidateBedId,
+                        status = "AVAILABLE",
+                        propertyId = propId,
+                        createdAt = System.currentTimeMillis(),
+                        updatedAt = System.currentTimeMillis(),
+                        syncStatus = "PENDING_UPLOAD"
+                    )
+                    bedDao.insertBed(newBed)
+                    syncCoordinator?.enqueueOperation("BED", "${propId}_${room.roomNumber}_$candidateBedId", "CREATE")
+                    currentCount++
+
+                    repairLogs.add(
+                        RepairActionLog(
+                            propertyId = propId,
+                            roomNumber = room.roomNumber,
+                            bedId = candidateBedId,
+                            previousState = "Missing physical BedEntity",
+                            repairedState = "Created BedEntity(status=AVAILABLE)",
+                            reason = "Initialized missing bed to match canonical room capacity (${room.capacity})",
+                            action = ResolutionAction.AUTOMATICALLY_REPAIRED
+                        )
+                    )
+                }
+                index++
+            }
+        }
+
+        // ====================================================================
+        // PHASE 3: RECONCILE BED ASSIGNMENTS, DUPLICATES & TENANTS (Case A, B, K, S)
+        // ====================================================================
+        val allBedsRefreshed = if (!targetPropertyId.isNullOrBlank()) {
+            bedDao.getAllBedsForProperty(targetPropertyId)
+        } else {
+            properties.flatMap { bedDao.getAllBedsForProperty(it.propertyId) }
+        }
+
+        val allTenantsRefreshed = if (!targetPropertyId.isNullOrBlank()) {
+            tenantDao.getAllTenants(targetPropertyId)
+        } else {
+            tenantDao.getAllTenants()
+        }
+
+        val allAssignmentsRefreshed = if (!targetPropertyId.isNullOrBlank()) {
             bedAssignmentDao.getAllAssignments(targetPropertyId)
         } else {
             properties.flatMap { bedAssignmentDao.getAllAssignments(it.propertyId) }
         }
 
-        for (tenant in activeTenants) {
-            val propId = if (tenant.propertyId.isNotBlank() && tenant.propertyId != "property_default") tenant.propertyId else defaultPropId
-            val tenantActiveAssignments = currentAssignments.filter {
-                it.tenantId == tenant.id && !it.deleted && (it.endDate == null || it.endDate > todayStr)
+        for (room in allRooms) {
+            val propId = if (room.propertyId.isNotBlank() && room.propertyId != "property_default") room.propertyId else defaultPropId
+            val roomBeds = allBedsRefreshed.filter { it.propertyId == propId && it.roomNumber == room.roomNumber && !it.deleted }
+            val roomBedMap = roomBeds.associateBy { it.bedId.lowercase() }
+
+            val activeTenantsInRoom = allTenantsRefreshed.filter {
+                it.propertyId == propId &&
+                        it.roomNumber == room.roomNumber &&
+                        !it.deleted &&
+                        (it.leavingDate.isBlank() || PgDateUtil.isDateFuture(it.leavingDate, todayStr))
             }
 
-            if (tenantActiveAssignments.isEmpty()) {
-                // Tenant has roomNumber and bedId, but no BedAssignmentEntity
-                val roomBeds = bedDao.getBedsForRoom(propId, tenant.roomNumber).filter { !it.deleted }
-                
-                // Determine candidate bed
-                val rawBedId = tenant.bedId.trim()
-                val targetBed = if (rawBedId.isNotBlank()) {
-                    // Try exact match or normalized match
-                    roomBeds.firstOrNull { it.bedId.equals(rawBedId, ignoreCase = true) }
-                        ?: roomBeds.firstOrNull { it.bedId.endsWith(rawBedId, ignoreCase = true) }
-                        ?: if (rawBedId.startsWith("Bed", ignoreCase = true)) {
-                            // Create bed if it doesn't exist
-                            val newBed = BedEntity(
-                                roomNumber = tenant.roomNumber,
-                                bedId = rawBedId,
-                                status = "AVAILABLE",
-                                propertyId = propId,
-                                createdAt = System.currentTimeMillis(),
+            val roomAssignments = allAssignmentsRefreshed.filter {
+                it.propertyId == propId &&
+                        it.roomNumber == room.roomNumber &&
+                        !it.deleted &&
+                        (it.startDate.isBlank() || !PgDateUtil.isDateFuture(it.startDate, todayStr)) &&
+                        (it.endDate.isNullOrBlank() || PgDateUtil.isDateFuture(it.endDate, todayStr))
+            }
+
+            // Track occupied beds in this room during reconciliation
+            val assignedTenantToBed = mutableMapOf<String, Int>() // bedId.lowercase -> tenantId
+
+            // 3.1 First respect existing valid assignments that link an active tenant in this room
+            for (assign in roomAssignments) {
+                val bedKey = assign.bedId.lowercase()
+                val targetBed = roomBedMap[bedKey]
+                if (targetBed != null && targetBed.status != "BLOCKED") {
+                    val matchingTenant = activeTenantsInRoom.firstOrNull { it.id == assign.tenantId }
+                    if (matchingTenant != null) {
+                        if (!assignedTenantToBed.containsKey(bedKey)) {
+                            assignedTenantToBed[bedKey] = matchingTenant.id
+                            // Ensure tenant record has matching bedId
+                            if (!matchingTenant.bedId.equals(targetBed.bedId, ignoreCase = true)) {
+                                val updatedTenant = matchingTenant.copy(
+                                    bedId = targetBed.bedId,
+                                    updatedAt = System.currentTimeMillis(),
+                                    syncStatus = "PENDING_UPLOAD"
+                                )
+                                tenantDao.updateTenant(updatedTenant)
+                                syncCoordinator?.enqueueOperation("TENANT", matchingTenant.id.toString(), "UPDATE")
+                            }
+                        } else {
+                            // DUPLICATE assignment on same bed!
+                            // Close duplicate assignment to resolve bed collision
+                            val duplicateAssign = assign.copy(
+                                endDate = todayStr,
                                 updatedAt = System.currentTimeMillis(),
                                 syncStatus = "PENDING_UPLOAD"
                             )
-                            bedDao.insertBed(newBed)
-                            newBed
-                        } else null
-                } else {
-                    // If bedId is blank, pick first available unassigned bed
-                    roomBeds.firstOrNull { it.status != "BLOCKED" }
+                            bedAssignmentDao.updateAssignment(duplicateAssign)
+                            syncCoordinator?.enqueueOperation("BED_ASSIGNMENT", duplicateAssign.assignmentId, "UPDATE")
+
+                            remainingReviewItems.add(
+                                IntegrityIssue(
+                                    type = IntegrityIssueType.K_DUPLICATE_ACTIVE_BED_ASSIGNMENT,
+                                    propertyId = propId,
+                                    roomNumber = room.roomNumber,
+                                    tenantId = matchingTenant.id,
+                                    tenantName = matchingTenant.name,
+                                    bedId = targetBed.bedId,
+                                    assignmentId = assign.assignmentId,
+                                    description = "Bed '${targetBed.bedId}' in Room ${room.roomNumber} had duplicate assignment for tenant '${matchingTenant.name}'. Closed duplicate assignment and flagged for review.",
+                                    actionTaken = ResolutionAction.FLAGGED_FOR_MANUAL_REVIEW
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 3.2 Now process active tenants who do not yet have an active assignment recorded
+            for (tenant in activeTenantsInRoom) {
+                if (assignedTenantToBed.values.contains(tenant.id)) {
+                    continue // Already assigned in 3.1
                 }
 
-                if (targetBed != null && targetBed.status != "BLOCKED") {
-                    // Check if target bed already has an active assignment for ANOTHER tenant
-                    val isBedAlreadyAssigned = currentAssignments.any {
-                        it.propertyId == propId &&
-                                it.roomNumber == tenant.roomNumber &&
-                                it.bedId == targetBed.bedId &&
-                                it.tenantId != tenant.id &&
-                                !it.deleted &&
-                                (it.endDate == null || it.endDate > todayStr)
-                    }
+                val requestedBedKey = tenant.bedId.trim().lowercase()
+                val candidateBed = if (requestedBedKey.isNotBlank()) roomBedMap[requestedBedKey] else null
 
-                    if (!isBedAlreadyAssigned) {
+                if (candidateBed != null && candidateBed.status != "BLOCKED" && !assignedTenantToBed.containsKey(candidateBed.bedId.lowercase())) {
+                    // Bed requested by tenant is free: Reconstruct missing BedAssignment!
+                    val bedKey = candidateBed.bedId.lowercase()
+                    assignedTenantToBed[bedKey] = tenant.id
+
+                    val newAssignment = BedAssignmentEntity(
+                        assignmentId = UUID.randomUUID().toString(),
+                        tenantId = tenant.id,
+                        roomNumber = room.roomNumber,
+                        bedId = candidateBed.bedId,
+                        startDate = tenant.moveInDate.ifBlank { todayStr },
+                        endDate = if (tenant.leavingDate.isNotBlank()) PgDateUtil.normalizeDate(tenant.leavingDate) else null,
+                        agreedRent = tenant.monthlyRent,
+                        propertyId = propId,
+                        createdAt = System.currentTimeMillis(),
+                        updatedAt = System.currentTimeMillis(),
+                        syncStatus = "PENDING_UPLOAD"
+                    )
+                    bedAssignmentDao.insertAssignment(newAssignment)
+                    syncCoordinator?.enqueueOperation("BED_ASSIGNMENT", newAssignment.assignmentId, "CREATE")
+
+                    repairLogs.add(
+                        RepairActionLog(
+                            propertyId = propId,
+                            roomNumber = room.roomNumber,
+                            tenantId = tenant.id,
+                            tenantName = tenant.name,
+                            bedId = candidateBed.bedId,
+                            previousState = "Active tenant without active BedAssignment",
+                            repairedState = "Created BedAssignment for bed ${candidateBed.bedId}",
+                            reason = "Reconstructed missing bed assignment for active tenant '${tenant.name}'",
+                            action = ResolutionAction.AUTOMATICALLY_REPAIRED
+                        )
+                    )
+                } else {
+                    // Bed is unavailable or conflicting!
+                    // Check if room has an unassigned usable bed available
+                    val freeBeds = roomBeds.filter { it.status != "BLOCKED" && !assignedTenantToBed.containsKey(it.bedId.lowercase()) }
+                    
+                    if (freeBeds.size == 1 && activeTenantsInRoom.count { !assignedTenantToBed.values.contains(it.id) } == 1) {
+                        // Unambiguous deterministic allocation: exactly 1 tenant unassigned and exactly 1 bed free!
+                        val freeBed = freeBeds.first()
+                        val bedKey = freeBed.bedId.lowercase()
+                        assignedTenantToBed[bedKey] = tenant.id
+
                         val newAssignment = BedAssignmentEntity(
                             assignmentId = UUID.randomUUID().toString(),
                             tenantId = tenant.id,
-                            roomNumber = tenant.roomNumber,
-                            bedId = targetBed.bedId,
+                            roomNumber = room.roomNumber,
+                            bedId = freeBed.bedId,
                             startDate = tenant.moveInDate.ifBlank { todayStr },
-                            endDate = if (tenant.leavingDate.isNotBlank()) tenant.leavingDate else null,
+                            endDate = if (tenant.leavingDate.isNotBlank()) PgDateUtil.normalizeDate(tenant.leavingDate) else null,
                             agreedRent = tenant.monthlyRent,
                             propertyId = propId,
                             createdAt = System.currentTimeMillis(),
@@ -508,171 +706,60 @@ class DataIntegrityManager @Inject constructor(
                         bedAssignmentDao.insertAssignment(newAssignment)
                         syncCoordinator?.enqueueOperation("BED_ASSIGNMENT", newAssignment.assignmentId, "CREATE")
 
-                        // Update bed to OCCUPIED
-                        val updatedBed = targetBed.copy(
-                            status = "OCCUPIED",
+                        val updatedTenant = tenant.copy(
+                            bedId = freeBed.bedId,
                             updatedAt = System.currentTimeMillis(),
                             syncStatus = "PENDING_UPLOAD"
                         )
-                        bedDao.updateBed(updatedBed)
-                        syncCoordinator?.enqueueOperation("BED", "${propId}_${targetBed.roomNumber}_${targetBed.bedId}", "UPDATE")
-
-                        // Update tenant if bedId was updated
-                        if (tenant.bedId != targetBed.bedId || tenant.propertyId != propId) {
-                            val updatedTenant = tenant.copy(
-                                bedId = targetBed.bedId,
-                                propertyId = propId,
-                                updatedAt = System.currentTimeMillis(),
-                                syncStatus = "PENDING_UPLOAD"
-                            )
-                            tenantDao.updateTenant(updatedTenant)
-                            syncCoordinator?.enqueueOperation("TENANT", tenant.id.toString(), "UPDATE")
-                        }
+                        tenantDao.updateTenant(updatedTenant)
+                        syncCoordinator?.enqueueOperation("TENANT", tenant.id.toString(), "UPDATE")
 
                         repairLogs.add(
                             RepairActionLog(
                                 propertyId = propId,
-                                roomNumber = tenant.roomNumber,
+                                roomNumber = room.roomNumber,
                                 tenantId = tenant.id,
                                 tenantName = tenant.name,
-                                bedId = targetBed.bedId,
-                                previousState = "Active Tenant with missing BedAssignment",
-                                repairedState = "Created BedAssignment & Bed marked OCCUPIED",
-                                reason = "Reconstructed missing active bed assignment for active tenant '${tenant.name}'",
+                                bedId = freeBed.bedId,
+                                previousState = "Conflicting/unallocated bed reference '${tenant.bedId}'",
+                                repairedState = "Allocated remaining vacant bed ${freeBed.bedId}",
+                                reason = "Resolved unambiguous single free bed in Room ${room.roomNumber} for tenant '${tenant.name}'",
                                 action = ResolutionAction.AUTOMATICALLY_REPAIRED
                             )
                         )
                     } else {
-                        // Bed collision: Cannot safely guess
+                        // Ambiguous collision or room over capacity: preserve financial history and flag for review
                         remainingReviewItems.add(
                             IntegrityIssue(
-                                type = IntegrityIssueType.K_DUPLICATE_ACTIVE_BED_ASSIGNMENT,
+                                type = if (activeTenantsInRoom.size > room.capacity) IntegrityIssueType.J_MORE_TENANTS_THAN_CAPACITY else IntegrityIssueType.K_DUPLICATE_ACTIVE_BED_ASSIGNMENT,
                                 propertyId = propId,
-                                roomNumber = tenant.roomNumber,
+                                roomNumber = room.roomNumber,
                                 tenantId = tenant.id,
                                 tenantName = tenant.name,
-                                bedId = targetBed.bedId,
-                                description = "Conflict: Bed '${targetBed.bedId}' is already assigned to another active tenant. Flagged for manual review.",
+                                bedId = tenant.bedId,
+                                description = "Tenant '${tenant.name}' has conflicting bed '${tenant.bedId}' in Room ${room.roomNumber}. Preserved tenant data and flagged for manual room allocation.",
                                 actionTaken = ResolutionAction.FLAGGED_FOR_MANUAL_REVIEW
                             )
                         )
                     }
-                } else {
-                    remainingReviewItems.add(
-                        IntegrityIssue(
-                            type = IntegrityIssueType.A_ACTIVE_TENANT_NO_ASSIGNMENT,
-                            propertyId = propId,
-                            roomNumber = tenant.roomNumber,
-                            tenantId = tenant.id,
-                            tenantName = tenant.name,
-                            description = "Could not unambiguously allocate a bed for tenant '${tenant.name}' in Room ${tenant.roomNumber}. Flagged for manual review.",
-                            actionTaken = ResolutionAction.FLAGGED_FOR_MANUAL_REVIEW
-                        )
-                    )
                 }
-            } else if (tenantActiveAssignments.size == 1) {
-                val assignment = tenantActiveAssignments.first()
-                if (tenant.roomNumber != assignment.roomNumber || tenant.bedId != assignment.bedId || tenant.propertyId != assignment.propertyId) {
-                    val updatedTenant = tenant.copy(
-                        roomNumber = assignment.roomNumber,
-                        bedId = assignment.bedId,
-                        propertyId = assignment.propertyId,
-                        updatedAt = System.currentTimeMillis(),
-                        syncStatus = "PENDING_UPLOAD"
-                    )
-                    tenantDao.updateTenant(updatedTenant)
-                    syncCoordinator?.enqueueOperation("TENANT", tenant.id.toString(), "UPDATE")
-
-                    repairLogs.add(
-                        RepairActionLog(
-                            propertyId = assignment.propertyId,
-                            roomNumber = assignment.roomNumber,
-                            tenantId = tenant.id,
-                            tenantName = tenant.name,
-                            bedId = assignment.bedId,
-                            previousState = "Tenant record (${tenant.roomNumber}/${tenant.bedId}) out of sync",
-                            repairedState = "Tenant record synced with assignment (${assignment.roomNumber}/${assignment.bedId})",
-                            reason = "Synchronized tenant fields with authoritative active bed assignment.",
-                            action = ResolutionAction.AUTOMATICALLY_REPAIRED
-                        )
-                    )
-                }
-            } else {
-                remainingReviewItems.add(
-                    IntegrityIssue(
-                        type = IntegrityIssueType.L_TENANT_MULTIPLE_ACTIVE_BEDS,
-                        propertyId = propId,
-                        roomNumber = tenant.roomNumber,
-                        tenantId = tenant.id,
-                        tenantName = tenant.name,
-                        description = "Tenant '${tenant.name}' has multiple active bed assignments. Flagged for manual review.",
-                        actionTaken = ResolutionAction.FLAGGED_FOR_MANUAL_REVIEW
-                    )
-                )
             }
-        }
 
-        // PHASE 4: Reconcile Bed States (OCCUPIED vs AVAILABLE vs BLOCKED) (Case G, H)
-        val refreshedAssignments = if (!targetPropertyId.isNullOrBlank()) {
-            bedAssignmentDao.getAllAssignments(targetPropertyId)
-        } else {
-            properties.flatMap { bedAssignmentDao.getAllAssignments(it.propertyId) }
-        }
+            // 3.3 Update Bed status (OCCUPIED vs AVAILABLE) for this room
+            for (bed in roomBeds) {
+                if (bed.status == "BLOCKED") continue
+                val bedKey = bed.bedId.lowercase()
+                val isOccupied = assignedTenantToBed.containsKey(bedKey)
 
-        val activeAssignsByBedKey = refreshedAssignments
-            .filter { !it.deleted && (it.endDate == null || it.endDate > todayStr) }
-            .groupBy { "${it.propertyId}#${it.roomNumber}#${it.bedId}" }
-
-        val refreshedBeds = if (!targetPropertyId.isNullOrBlank()) {
-            bedDao.getAllBedsForProperty(targetPropertyId)
-        } else {
-            properties.flatMap { bedDao.getAllBedsForProperty(it.propertyId) }
-        }
-
-        for (bed in refreshedBeds.filter { !it.deleted }) {
-            val key = "${bed.propertyId}#${bed.roomNumber}#${bed.bedId}"
-            val activeAssigns = activeAssignsByBedKey[key].orEmpty()
-
-            if (bed.status == "AVAILABLE" && activeAssigns.isNotEmpty()) {
-                val updatedBed = bed.copy(
-                    status = "OCCUPIED",
-                    updatedAt = System.currentTimeMillis(),
-                    syncStatus = "PENDING_UPLOAD"
-                )
-                bedDao.updateBed(updatedBed)
-                syncCoordinator?.enqueueOperation("BED", "${bed.propertyId}_${bed.roomNumber}_${bed.bedId}", "UPDATE")
-
-                repairLogs.add(
-                    RepairActionLog(
-                        propertyId = bed.propertyId,
-                        roomNumber = bed.roomNumber,
-                        bedId = bed.bedId,
-                        previousState = "Status = AVAILABLE with ${activeAssigns.size} active assignment(s)",
-                        repairedState = "Status = OCCUPIED",
-                        reason = "Corrected bed availability state to match active assignment.",
-                        action = ResolutionAction.AUTOMATICALLY_REPAIRED
-                    )
-                )
-            } else if (bed.status == "OCCUPIED" && activeAssigns.isEmpty()) {
-                val updatedBed = bed.copy(
-                    status = "AVAILABLE",
-                    updatedAt = System.currentTimeMillis(),
-                    syncStatus = "PENDING_UPLOAD"
-                )
-                bedDao.updateBed(updatedBed)
-                syncCoordinator?.enqueueOperation("BED", "${bed.propertyId}_${bed.roomNumber}_${bed.bedId}", "UPDATE")
-
-                repairLogs.add(
-                    RepairActionLog(
-                        propertyId = bed.propertyId,
-                        roomNumber = bed.roomNumber,
-                        bedId = bed.bedId,
-                        previousState = "Status = OCCUPIED with 0 active assignments",
-                        repairedState = "Status = AVAILABLE",
-                        reason = "Bed has no active tenant or assignment; reset status to AVAILABLE.",
-                        action = ResolutionAction.AUTOMATICALLY_REPAIRED
-                    )
-                )
+                if (isOccupied && bed.status != "OCCUPIED") {
+                    val updatedBed = bed.copy(status = "OCCUPIED", updatedAt = System.currentTimeMillis(), syncStatus = "PENDING_UPLOAD")
+                    bedDao.updateBed(updatedBed)
+                    syncCoordinator?.enqueueOperation("BED", "${propId}_${room.roomNumber}_${bed.bedId}", "UPDATE")
+                } else if (!isOccupied && bed.status != "AVAILABLE") {
+                    val updatedBed = bed.copy(status = "AVAILABLE", updatedAt = System.currentTimeMillis(), syncStatus = "PENDING_UPLOAD")
+                    bedDao.updateBed(updatedBed)
+                    syncCoordinator?.enqueueOperation("BED", "${propId}_${room.roomNumber}_${bed.bedId}", "UPDATE")
+                }
             }
         }
 

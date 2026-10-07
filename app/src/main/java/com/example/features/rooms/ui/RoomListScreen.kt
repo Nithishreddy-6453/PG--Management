@@ -1,9 +1,6 @@
 package com.example.features.rooms.ui
 
 import android.widget.Toast
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -16,8 +13,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -38,6 +36,7 @@ import com.example.core.language.GlobalLanguageToggle
 import com.example.core.language.rememberTranslation
 import com.example.features.rooms.domain.model.RoomSummary
 import com.example.features.rooms.domain.model.RoomValidationResult
+import com.example.features.rooms.domain.usecase.OverallOccupancy
 import com.example.features.rooms.ui.viewmodel.RoomListUiState
 import com.example.features.rooms.ui.viewmodel.RoomListViewModel
 
@@ -62,12 +61,13 @@ fun RoomListScreen(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     val titleText = rememberTranslation("Rooms")
-    val searchPlaceholderText = rememberTranslation("Search by room number, floor or type...")
-    val allRoomsText = rememberTranslation("All Rooms")
+    val searchPlaceholderText = rememberTranslation("Search rooms...")
+    val addRoomText = rememberTranslation("Add Room")
+    val allText = rememberTranslation("All")
     val availableText = rememberTranslation("Available")
+    val partialText = rememberTranslation("Partial")
     val fullText = rememberTranslation("Full")
-    val partialText = rememberTranslation("Partially Occupied")
-    val vacantText = rememberTranslation("Vacant")
+    val emptyText = rememberTranslation("Empty")
     val noRoomsFoundText = rememberTranslation("No rooms found")
     val tryChangingFiltersText = rememberTranslation("Try changing your filters or search.")
     val clearFiltersText = rememberTranslation("Clear Filters")
@@ -97,34 +97,34 @@ fun RoomListScreen(
                         color = Color(0xFF0F172A)
                     )
                 },
-                navigationIcon = {
-                    IconButton(
-                        onClick = onBackClick,
-                        modifier = Modifier
-                            .minimumInteractiveComponentSize()
-                            .testTag("back_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Navigate back",
-                            tint = Color(0xFF0F172A)
-                        )
-                    }
-                },
+                navigationIcon = {}, // Root bottom navigation screen - back navigation omitted for clean hierarchy
                 actions = {
                     GlobalLanguageToggle(
                         modifier = Modifier.padding(end = 4.dp)
                     )
-                    IconButton(
-                        onClick = { showFilterSheet = true },
+                    FilledTonalButton(
+                        onClick = onAddRoomClick,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = Color(0xFFEFF6FF),
+                            contentColor = Color(0xFF2563EB)
+                        ),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                         modifier = Modifier
-                            .minimumInteractiveComponentSize()
-                            .testTag("filter_button")
+                            .padding(end = 12.dp)
+                            .height(36.dp)
+                            .testTag("add_room_header_button")
                     ) {
                         Icon(
-                            imageVector = Icons.Default.FilterList,
-                            contentDescription = "Filter Rooms",
-                            tint = Color(0xFF0F172A)
+                            imageVector = Icons.Default.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = addRoomText,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 },
@@ -140,22 +140,6 @@ fun RoomListScreen(
                 currentTab = com.example.core.designsystem.MainTab.ROOMS,
                 onNavigate = onNavigate
             )
-        },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = { onAddRoomClick() },
-                containerColor = Color(0xFF2563EB),
-                contentColor = Color.White,
-                modifier = Modifier
-                    .testTag("add_room_fab")
-                    .padding(bottom = 16.dp),
-                shape = CircleShape
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Add New Room"
-                )
-            }
         },
         containerColor = Color(0xFFF8FAFC),
         modifier = modifier.fillMaxSize().testTag("rooms_screen_container")
@@ -182,60 +166,98 @@ fun RoomListScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        // 1. Occupancy Summary Card
-                        OccupancySummaryHeader(overall = state.overallOccupancy)
+                        // 1. Compact Bed Occupancy Summary
+                        CompactOccupancySummary(overall = state.overallOccupancy)
 
-                        // 2. Search Field
-                        OutlinedTextField(
-                            value = state.searchQuery,
-                            onValueChange = { viewModel.onSearchQueryChanged(it) },
-                            placeholder = { Text(searchPlaceholderText, fontSize = 14.sp, color = Color(0xFF94A3B8)) },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Default.Search,
-                                    contentDescription = "Search",
-                                    tint = Color(0xFF94A3B8)
-                                )
-                            },
-                            trailingIcon = {
-                                if (state.searchQuery.isNotBlank()) {
-                                    IconButton(onClick = { viewModel.onSearchQueryChanged("") }) {
-                                        Icon(
-                                            imageVector = Icons.Default.Clear,
-                                            contentDescription = "Clear search",
-                                            tint = Color(0xFF94A3B8)
-                                        )
+                        // 2. Search Field + Filter Button in a compact row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = state.searchQuery,
+                                onValueChange = { viewModel.onSearchQueryChanged(it) },
+                                placeholder = {
+                                    Text(
+                                        searchPlaceholderText,
+                                        fontSize = 13.sp,
+                                        color = Color(0xFF94A3B8)
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.Search,
+                                        contentDescription = "Search",
+                                        tint = Color(0xFF94A3B8),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                trailingIcon = {
+                                    if (state.searchQuery.isNotBlank()) {
+                                        IconButton(onClick = { viewModel.onSearchQueryChanged("") }) {
+                                            Icon(
+                                                imageVector = Icons.Default.Clear,
+                                                contentDescription = "Clear search",
+                                                tint = Color(0xFF94A3B8),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
                                     }
-                                }
-                            },
-                            singleLine = true,
-                            shape = RoundedCornerShape(16.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = Color.White,
-                                unfocusedContainerColor = Color.White,
-                                focusedBorderColor = Color(0xFF2563EB),
-                                unfocusedBorderColor = Color(0xFFE2E8F0)
-                            ),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                            keyboardActions = KeyboardActions(onSearch = { keyboardController?.hide() }),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("room_search_input")
-                        )
+                                },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedContainerColor = Color.White,
+                                    unfocusedContainerColor = Color.White,
+                                    focusedBorderColor = Color(0xFF2563EB),
+                                    unfocusedBorderColor = Color(0xFFE2E8F0)
+                                ),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                keyboardActions = KeyboardActions(onSearch = { keyboardController?.hide() }),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("room_search_input")
+                            )
 
-                        // 3. Status Filter Chips (Horizontal Row)
+                            val hasActiveSecondaryFilters = state.selectedFloor != "All" || state.selectedRoomType != "All"
+                            OutlinedIconButton(
+                                onClick = { showFilterSheet = true },
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (hasActiveSecondaryFilters) Color(0xFF2563EB) else Color(0xFFE2E8F0)
+                                ),
+                                colors = IconButtonDefaults.outlinedIconButtonColors(
+                                    containerColor = if (hasActiveSecondaryFilters) Color(0xFFEFF6FF) else Color.White
+                                ),
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .testTag("filter_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.FilterList,
+                                    contentDescription = "Filter Rooms",
+                                    tint = if (hasActiveSecondaryFilters) Color(0xFF2563EB) else Color(0xFF475569),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        // 3. Status Filter Chips (All, Available, Partial, Full, Empty)
                         LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             val filters = listOf(
-                                Triple("All", allRoomsText, state.totalCount),
+                                Triple("All", allText, state.totalCount),
                                 Triple("Available", availableText, state.availableCount),
+                                Triple("Partial", partialText, state.partiallyOccupiedCount),
                                 Triple("Full", fullText, state.fullCount),
-                                Triple("Partially Occupied", partialText, state.partiallyOccupiedCount),
-                                Triple("Vacant", vacantText, state.vacantCount)
+                                Triple("Empty", emptyText, state.vacantCount)
                             )
                             items(filters) { (id, label, count) ->
                                 val isSelected = state.selectedStatus == id
@@ -245,7 +267,7 @@ fun RoomListScreen(
                                     label = {
                                         Text(
                                             text = "$label ($count)",
-                                            fontSize = 13.sp,
+                                            fontSize = 12.sp,
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                                         )
                                     },
@@ -261,6 +283,7 @@ fun RoomListScreen(
                                         selectedBorderColor = Color(0xFF3B82F6),
                                         borderColor = Color(0xFFE2E8F0)
                                     ),
+                                    shape = RoundedCornerShape(10.dp),
                                     modifier = Modifier.testTag("status_chip_$id")
                                 )
                             }
@@ -283,12 +306,12 @@ fun RoomListScreen(
                                         imageVector = Icons.Default.SearchOff,
                                         contentDescription = null,
                                         tint = Color(0xFF94A3B8),
-                                        modifier = Modifier.size(48.dp)
+                                        modifier = Modifier.size(44.dp)
                                     )
-                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Spacer(modifier = Modifier.height(10.dp))
                                     Text(
                                         text = noRoomsFoundText,
-                                        fontSize = 16.sp,
+                                        fontSize = 15.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color(0xFF0F172A)
                                     )
@@ -299,10 +322,10 @@ fun RoomListScreen(
                                         color = Color(0xFF64748B),
                                         textAlign = TextAlign.Center
                                     )
-                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Spacer(modifier = Modifier.height(14.dp))
                                     OutlinedButton(
                                         onClick = { viewModel.resetFilters() },
-                                        shape = RoundedCornerShape(12.dp)
+                                        shape = RoundedCornerShape(10.dp)
                                     ) {
                                         Text(clearFiltersText)
                                     }
@@ -310,8 +333,8 @@ fun RoomListScreen(
                             }
                         } else {
                             LazyColumn(
-                                verticalArrangement = Arrangement.spacedBy(12.dp),
-                                contentPadding = PaddingValues(bottom = 80.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                contentPadding = PaddingValues(bottom = 16.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .weight(1f)
@@ -373,7 +396,7 @@ fun RoomListScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(24.dp)
+                        .padding(horizontal = 24.dp, vertical = 16.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -391,16 +414,16 @@ fun RoomListScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     // Floor Filter
                     Text(
                         text = "Floor",
-                        fontSize = 14.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = Color(0xFF334155)
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(successState.availableFloors) { floor ->
                             FilterChip(
@@ -411,16 +434,16 @@ fun RoomListScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
                     // Room Type (AC / Non-AC) Filter
                     Text(
                         text = "Room Type",
-                        fontSize = 14.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = Color(0xFF334155)
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(successState.availableRoomTypes) { type ->
                             FilterChip(
@@ -431,7 +454,7 @@ fun RoomListScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(20.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -444,8 +467,8 @@ fun RoomListScreen(
                             },
                             modifier = Modifier
                                 .weight(1f)
-                                .height(48.dp),
-                            shape = RoundedCornerShape(12.dp)
+                                .height(44.dp),
+                            shape = RoundedCornerShape(10.dp)
                         ) {
                             Text("Clear Filters")
                         }
@@ -457,9 +480,9 @@ fun RoomListScreen(
                             },
                             modifier = Modifier
                                 .weight(1f)
-                                .height(48.dp),
+                                .height(44.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(10.dp)
                         ) {
                             Text("Apply Filters")
                         }
@@ -471,61 +494,69 @@ fun RoomListScreen(
     }
 }
 
+/**
+ * Compact occupancy summary header.
+ * Clearly states beds, occupied beds, beds available, and occupancy percentage.
+ */
 @Composable
-fun OccupancySummaryHeader(
-    overall: com.example.features.rooms.domain.usecase.OverallOccupancy,
+fun CompactOccupancySummary(
+    overall: OverallOccupancy,
     modifier: Modifier = Modifier
 ) {
     Card(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
         border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
         modifier = modifier.fillMaxWidth()
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // "8 beds · 3 occupied · 5 available"
                 Text(
-                    text = "${overall.totalBeds} Total Beds",
+                    text = "${overall.totalBeds} beds · ${overall.occupiedBeds} occupied · ${overall.availableBeds} beds available",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFF64748B)
+                    color = Color(0xFF334155),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "${overall.occupiedBeds} Occupied",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFF2563EB)
-                )
-                Text(
-                    text = "${overall.availableBeds} Available",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFF10B981)
+                    text = "${String.format("%.0f", overall.occupancyPercentage)}%",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (overall.occupancyPercentage >= 90) Color(0xFFDC2626) else Color(0xFF2563EB)
                 )
             }
-            Spacer(modifier = Modifier.height(10.dp))
             LinearProgressIndicator(
                 progress = { if (overall.totalBeds > 0) (overall.occupiedBeds.toFloat() / overall.totalBeds) else 0f },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(8.dp)
-                    .clip(RoundedCornerShape(4.dp)),
-                color = Color(0xFF2563EB),
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp)),
+                color = if (overall.occupancyPercentage >= 90) Color(0xFFDC2626) else Color(0xFF2563EB),
                 trackColor = Color(0xFFEFF6FF)
             )
         }
     }
 }
 
+/**
+ * Streamlined, scannable Room Card.
+ * Structure:
+ * Room 352                         1/3
+ * 3rd floor · AC
+ * ₹6,000 / bed / month · 2 beds available   >
+ */
 @Composable
 fun RoomCardItem(
     summary: RoomSummary,
@@ -534,202 +565,178 @@ fun RoomCardItem(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val statusColor = when (summary.occupancyStatus) {
-        "Full" -> Color(0xFFDC2626)
-        "Available" -> Color(0xFFD97706)
-        "Empty" -> Color(0xFF64748B)
-        else -> Color(0xFF2563EB)
-    }
+    var showMenu by remember { mutableStateOf(false) }
 
-    val statusBgColor = when (summary.occupancyStatus) {
-        "Full" -> Color(0xFFFEF2F2)
-        "Available" -> Color(0xFFFEF3C7)
-        "Empty" -> Color(0xFFF1F5F9)
-        else -> Color(0xFFEFF6FF)
+    val statusBadgeColor: Color
+    val statusBadgeBg: Color
+    when {
+        summary.occupiedBeds == 0 -> {
+            statusBadgeColor = Color(0xFF64748B)
+            statusBadgeBg = Color(0xFFF1F5F9)
+        }
+        summary.availableBeds == 0 && summary.usableBeds > 0 -> {
+            statusBadgeColor = Color(0xFFDC2626)
+            statusBadgeBg = Color(0xFFFEF2F2)
+        }
+        else -> {
+            statusBadgeColor = Color(0xFF2563EB)
+            statusBadgeBg = Color(0xFFEFF6FF)
+        }
     }
 
     Card(
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
         border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
         modifier = modifier
             .fillMaxWidth()
             .clickable { onViewDetails() }
+            .testTag("room_card_${summary.roomNumber}")
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(horizontal = 14.dp, vertical = 12.dp)
         ) {
-            // Row 1: Room Number & Status Badges
+            // Row 1: Room Number & Occupancy Count (1/3) + Overflow Menu
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .background(Color(0xFFEFF6FF), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.MeetingRoom,
-                            contentDescription = null,
-                            tint = Color(0xFF2563EB),
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = "Room ${summary.roomNumber}",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A)
-                        )
-                        Text(
-                            text = "${summary.floor} • ${summary.roomType}",
-                            fontSize = 12.sp,
-                            color = Color(0xFF64748B)
-                        )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Room ${summary.roomNumber}",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A)
+                    )
+
+                    // Optional "Vacating soon" badge
+                    if (summary.hasUpcomingVacancy) {
+                        Surface(
+                            color = Color(0xFFFEF3C7),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = "Vacating soon",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFD97706),
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
                     }
                 }
 
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    if (summary.hasUpcomingVacancy) {
-                        Surface(
-                            color = Color(0xFFFEF3C7),
-                            shape = RoundedCornerShape(12.dp)
+                    // Ratio Pill (e.g. "1/3")
+                    Surface(
+                        color = statusBadgeBg,
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = "${summary.occupiedBeds}/${summary.usableBeds}",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = statusBadgeColor,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+
+                    // Compact Overflow Menu for Edit / Delete
+                    Box {
+                        IconButton(
+                            onClick = { showMenu = true },
+                            modifier = Modifier
+                                .size(32.dp)
+                                .testTag("room_options_${summary.roomNumber}")
                         ) {
-                            Text(
-                                text = "1 Vacating Soon",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFFD97706),
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            Icon(
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "Room options",
+                                tint = Color(0xFF94A3B8),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = showMenu,
+                            onDismissRequest = { showMenu = false },
+                            modifier = Modifier.background(Color.White)
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Edit Room", fontSize = 13.sp) },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = null,
+                                        tint = Color(0xFF2563EB),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                },
+                                onClick = {
+                                    showMenu = false
+                                    onEdit()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Delete Room", fontSize = 13.sp, color = Color(0xFFDC2626)) },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = null,
+                                        tint = Color(0xFFDC2626),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                },
+                                onClick = {
+                                    showMenu = false
+                                    onDelete()
+                                }
                             )
                         }
                     }
-
-                    Surface(
-                        color = statusBgColor,
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text(
-                            text = summary.occupancyStatus,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = statusColor,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
-            HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(2.dp))
 
-            // Row 2: Stats (Rent, Beds Occupied, Active Tenants)
+            // Row 2: Floor · Room Type
+            Text(
+                text = "${summary.floor} · ${summary.roomType}",
+                fontSize = 12.sp,
+                color = Color(0xFF64748B)
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Row 3: Rate per bed per month · Available beds · Chevron
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column {
-                    Text(
-                        text = "Monthly Rent",
-                        fontSize = 11.sp,
-                        color = Color(0xFF64748B)
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "₹${String.format("%.0f", summary.ratePerBed)} / bed",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF2563EB)
-                    )
-                }
-
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "Beds Occupied",
-                        fontSize = 11.sp,
-                        color = Color(0xFF64748B)
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "${summary.occupiedBeds} / ${summary.totalBeds}",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF0F172A)
-                    )
-                }
-
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = "Active Tenants",
-                        fontSize = 11.sp,
-                        color = Color(0xFF64748B)
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "${summary.activeTenantCount}",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF0F172A)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-            HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Row 3: Action Buttons (View, Edit, Delete)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                TextButton(
-                    onClick = onViewDetails,
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                    modifier = Modifier.minimumInteractiveComponentSize()
-                ) {
-                    Icon(imageVector = Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color(0xFF64748B))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("View", fontSize = 13.sp, color = Color(0xFF64748B))
-                }
+                Text(
+                    text = "₹${String.format("%.0f", summary.ratePerBed)} / bed / month · ${summary.availableBeds} beds available",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = if (summary.availableBeds > 0) Color(0xFF047857) else Color(0xFF64748B)
+                )
 
-                Spacer(modifier = Modifier.width(4.dp))
-
-                TextButton(
-                    onClick = onEdit,
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                    modifier = Modifier.minimumInteractiveComponentSize()
-                ) {
-                    Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color(0xFF2563EB))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Edit", fontSize = 13.sp, color = Color(0xFF2563EB))
-                }
-
-                Spacer(modifier = Modifier.width(4.dp))
-
-                TextButton(
-                    onClick = onDelete,
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                    modifier = Modifier.minimumInteractiveComponentSize()
-                ) {
-                    Icon(imageVector = Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color(0xFFDC2626))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Delete", fontSize = 13.sp, color = Color(0xFFDC2626))
-                }
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                    contentDescription = null,
+                    tint = Color(0xFFCBD5E1),
+                    modifier = Modifier.size(12.dp)
+                )
             }
         }
     }
@@ -747,7 +754,7 @@ fun EmptyRoomsState(
         contentAlignment = Alignment.Center
     ) {
         Card(
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = Color.White),
             elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
             border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
@@ -756,13 +763,13 @@ fun EmptyRoomsState(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(32.dp),
+                    .padding(28.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
                 Box(
                     modifier = Modifier
-                        .size(72.dp)
+                        .size(64.dp)
                         .background(Color(0xFFEFF6FF), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
@@ -770,42 +777,42 @@ fun EmptyRoomsState(
                         imageVector = Icons.Default.MeetingRoom,
                         contentDescription = null,
                         tint = Color(0xFF2563EB),
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(32.dp)
                     )
                 }
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(16.dp))
                 Text(
                     text = "No Rooms Yet",
-                    fontSize = 18.sp,
+                    fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF0F172A)
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = "Register your property rooms to manage bed allocation, occupancy, and rent collection.",
-                    fontSize = 14.sp,
+                    fontSize = 13.sp,
                     color = Color(0xFF64748B),
-                    lineHeight = 20.sp,
+                    lineHeight = 18.sp,
                     textAlign = TextAlign.Center
                 )
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(20.dp))
                 Button(
                     onClick = { onAddRoomClick() },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                    shape = RoundedCornerShape(14.dp),
-                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
                     modifier = Modifier.testTag("add_first_room_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Add,
                         contentDescription = null,
-                        modifier = Modifier.size(18.dp),
+                        modifier = Modifier.size(16.dp),
                         tint = Color.White
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = "Add First Room",
-                        fontSize = 15.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = Color.White
                     )

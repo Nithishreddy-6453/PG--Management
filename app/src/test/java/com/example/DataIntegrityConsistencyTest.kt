@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.core.common.PgLogger
+import com.example.core.common.PgLoggerImpl
 import com.example.core.integrity.DataIntegrityManager
 import com.example.core.integrity.IntegrityIssueType
 import com.example.data.database.*
@@ -17,6 +18,7 @@ import com.example.features.tenants.domain.usecase.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -64,7 +66,9 @@ class DataIntegrityConsistencyTest {
         propertyDao = db.propertyDao()
 
         val currentPropertyManager = CurrentPropertyManager(context, propertyDao)
-        currentPropertyManager.setCurrentPropertyId("property_default")
+        runBlocking {
+            currentPropertyManager.setCurrentPropertyId("property_default")
+        }
         val logger = PgLoggerImpl()
 
         roomRepository = RoomRepositoryImpl(roomDao, tenantDao, rentPaymentDao, bedDao, bedAssignmentDao, currentPropertyManager, null, db)

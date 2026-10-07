@@ -29,10 +29,11 @@ class ValidateRoomUseCase @Inject constructor(
         capacity: Int,
         ratePerBed: Double
     ): RoomValidationResult {
-        if (roomNumber.isBlank()) {
+        val trimmed = roomNumber.trim()
+        if (trimmed.isBlank()) {
             return RoomValidationResult.Error("Room Number is required.")
         }
-        if (floor.isBlank()) {
+        if (floor.trim().isBlank()) {
             return RoomValidationResult.Error("Floor is required.")
         }
         if (capacity <= 0) {
@@ -41,9 +42,9 @@ class ValidateRoomUseCase @Inject constructor(
         if (ratePerBed < 0) {
             return RoomValidationResult.Error("Monthly rent cannot be negative.")
         }
-        val existingRoom = repository.getRoom(roomNumber.trim())
+        val existingRoom = repository.getRoom(trimmed)
         if (existingRoom != null) {
-            return RoomValidationResult.Error("Room Number ${roomNumber.trim()} already exists.")
+            return RoomValidationResult.Error("Room Number $trimmed already exists.")
         }
         return RoomValidationResult.Success
     }
@@ -54,10 +55,11 @@ class ValidateRoomUseCase @Inject constructor(
         capacity: Int,
         ratePerBed: Double
     ): RoomValidationResult {
-        if (roomNumber.isBlank()) {
+        val trimmed = roomNumber.trim()
+        if (trimmed.isBlank()) {
             return RoomValidationResult.Error("Room Number is required.")
         }
-        if (floor.isBlank()) {
+        if (floor.trim().isBlank()) {
             return RoomValidationResult.Error("Floor is required.")
         }
         if (capacity <= 0) {
@@ -82,10 +84,11 @@ class AddRoomUseCase @Inject constructor(
         roomType: String,
         notes: String
     ): RoomValidationResult {
-        val validation = validateUseCase.validateForAdd(roomNumber, floor, capacity, ratePerBed)
+        val trimmed = roomNumber.trim()
+        val validation = validateUseCase.validateForAdd(trimmed, floor, capacity, ratePerBed)
         if (validation is RoomValidationResult.Success) {
             val entity = RoomEntity(
-                roomNumber = roomNumber.trim(),
+                roomNumber = trimmed,
                 floor = floor.trim(),
                 capacity = capacity,
                 ratePerBed = ratePerBed,
