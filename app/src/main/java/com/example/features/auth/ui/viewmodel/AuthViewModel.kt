@@ -29,60 +29,89 @@ class AuthViewModel @Inject constructor(
     private val _authState = MutableStateFlow<AuthState>(AuthState.Idle)
     val authState: StateFlow<AuthState> = _authState.asStateFlow()
 
+    private val _passwordResetStatus = MutableStateFlow<String?>(null)
+    val passwordResetStatus: StateFlow<String?> = _passwordResetStatus.asStateFlow()
+
+    fun sendPasswordResetEmail(email: String) {
+        val trimmedEmail = email.trim().lowercase(java.util.Locale.getDefault())
+        if (trimmedEmail.isBlank()) {
+            _authState.value = AuthState.Error("Please enter your email address to reset password.")
+            return
+        }
+        if (!android.util.Patterns.EMAIL_ADDRESS.matcher(trimmedEmail).matches()) {
+            _authState.value = AuthState.Error("Please enter a valid email address.")
+            return
+        }
+        viewModelScope.launch {
+            _authState.value = AuthState.Loading
+            val result = authRepository.sendPasswordResetEmail(trimmedEmail)
+            if (result.isSuccess) {
+                _authState.value = AuthState.Idle
+                _passwordResetStatus.value = "Password reset email sent to $trimmedEmail. Please check your inbox."
+            } else {
+                _authState.value = AuthState.Error(result.exceptionOrNull()?.message ?: "Failed to send reset email.")
+            }
+        }
+    }
+
+    fun clearPasswordResetStatus() {
+        _passwordResetStatus.value = null
+    }
+
     fun signInWithEmail(email: String, password: String) {
-        val trimmedEmail = email.trim()
-        val trimmedPassword = password.trim()
+        val trimmedEmail = email.trim().lowercase(java.util.Locale.getDefault())
+        val rawPassword = password
         if (trimmedEmail.isBlank()) {
             _authState.value = AuthState.Error("Please enter your email address.")
             return
         }
         if (!android.util.Patterns.EMAIL_ADDRESS.matcher(trimmedEmail).matches()) {
-            _authState.value = AuthState.Error("Please enter a valid email address (e.g. name@example.com).")
+            _authState.value = AuthState.Error("Please enter a valid email address.")
             return
         }
-        if (trimmedPassword.isBlank()) {
+        if (rawPassword.isEmpty()) {
             _authState.value = AuthState.Error("Please enter your password.")
             return
         }
 
         viewModelScope.launch {
             _authState.value = AuthState.Loading
-            val result = authRepository.signInWithEmail(trimmedEmail, trimmedPassword)
+            val result = authRepository.signInWithEmail(trimmedEmail, rawPassword)
             if (result.isSuccess) {
                 val uid = getCurrentUser()?.uid ?: "default_owner"
                 val signInResult = syncCoordinator?.handleUserSignIn(uid) ?: SignInResult.NewAccount
                 _authState.value = AuthState.Success(signInResult)
             } else {
-                _authState.value = AuthState.Error(result.exceptionOrNull()?.message ?: "Login failed")
+                _authState.value = AuthState.Error(result.exceptionOrNull()?.message ?: "Authentication failed. Please try again.")
             }
         }
     }
 
     fun signUpWithEmail(email: String, password: String) {
-        val trimmedEmail = email.trim()
-        val trimmedPassword = password.trim()
+        val trimmedEmail = email.trim().lowercase(java.util.Locale.getDefault())
+        val rawPassword = password
         if (trimmedEmail.isBlank()) {
             _authState.value = AuthState.Error("Please enter your email address.")
             return
         }
         if (!android.util.Patterns.EMAIL_ADDRESS.matcher(trimmedEmail).matches()) {
-            _authState.value = AuthState.Error("Please enter a valid email address (e.g. name@example.com).")
+            _authState.value = AuthState.Error("Please enter a valid email address.")
             return
         }
-        if (trimmedPassword.length < 6) {
+        if (rawPassword.length < 6) {
             _authState.value = AuthState.Error("Password must be at least 6 characters long.")
             return
         }
 
         viewModelScope.launch {
             _authState.value = AuthState.Loading
-            val result = authRepository.signUpWithEmail(trimmedEmail, trimmedPassword)
+            val result = authRepository.signUpWithEmail(trimmedEmail, rawPassword)
             if (result.isSuccess) {
                 val uid = getCurrentUser()?.uid ?: "default_owner"
                 val signInResult = syncCoordinator?.handleUserSignIn(uid) ?: SignInResult.NewAccount
                 _authState.value = AuthState.Success(signInResult)
             } else {
-                _authState.value = AuthState.Error(result.exceptionOrNull()?.message ?: "Sign up failed")
+                _authState.value = AuthState.Error(result.exceptionOrNull()?.message ?: "Account registration failed. Please try again.")
             }
         }
     }

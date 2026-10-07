@@ -566,7 +566,7 @@ private fun PgLogoGraphic(modifier: Modifier = Modifier) {
  * Clean 4-color Google 'G' icon badge
  */
 @Composable
-private fun GoogleLogoIcon(modifier: Modifier = Modifier) {
+fun GoogleLogoIcon(modifier: Modifier = Modifier) {
     Surface(
         shape = CircleShape,
         color = Color.White,
