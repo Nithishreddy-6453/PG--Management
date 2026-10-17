@@ -29,15 +29,39 @@ class FirestorePaymentRepository @Inject constructor(
                 paymentDto.cloudId.isNotBlank() -> paymentDto.cloudId
                 paymentDto.id.isNotBlank() -> paymentDto.id
                 paymentDto.localId > 0 -> "payment_${paymentDto.localId}"
-                else -> "payment_${System.currentTimeMillis()}"
+                else -> "payment_${paymentDto.tenantId}_${paymentDto.billingMonth.hashCode().toUInt()}"
             }
+            val now = if (paymentDto.updatedAt > 0) paymentDto.updatedAt else System.currentTimeMillis()
             val dtoToSave = paymentDto.copy(
                 id = docId,
                 cloudId = docId,
                 ownerId = if (paymentDto.ownerId.isNotBlank()) paymentDto.ownerId else currentOwnerId,
-                updatedAt = System.currentTimeMillis()
+                updatedAt = now
             )
-            collection.document(docId).set(dtoToSave).await()
+            val docRef = collection.document(docId)
+            firestore.runTransaction { transaction ->
+                val snapshot = transaction.get(docRef)
+                if (snapshot.exists()) {
+                    val remoteVersion = snapshot.getLong("version")?.toInt() ?: 1
+                    val remoteUpdatedAt = snapshot.getLong("updatedAt") ?: 0L
+                    val remoteDeleted = snapshot.getBoolean("deleted") ?: false
+                    val remoteDeviceId = snapshot.getString("lastModifiedByDeviceId") ?: ""
+
+                    // Idempotency: Reject stale write that would resurrect a deleted record
+                    if (remoteDeleted && !dtoToSave.deleted) {
+                        return@runTransaction
+                    }
+                    // Idempotency: Reject stale write if remote document is strictly newer
+                    if (remoteVersion > dtoToSave.version) {
+                        return@runTransaction
+                    }
+                    // Idempotency: Reject stale write if remote has equal version but newer timestamp from another device
+                    if (remoteVersion == dtoToSave.version && remoteUpdatedAt > dtoToSave.updatedAt && remoteDeviceId.isNotBlank() && remoteDeviceId != dtoToSave.lastModifiedByDeviceId) {
+                        return@runTransaction
+                    }
+                }
+                transaction.set(docRef, dtoToSave)
+            }.await()
             PgResult.Success(Unit)
         } catch (e: FirebaseFirestoreException) {
             PgResult.Failure(mapFirestoreException(e))
@@ -100,17 +124,29 @@ class FirestorePaymentRepository @Inject constructor(
 
     suspend fun deletePayment(id: String, deviceId: String = ""): PgResult<Unit> {
         return try {
-            val updates = mutableMapOf<String, Any>(
-                "deleted" to true,
-                "updatedAt" to System.currentTimeMillis()
-            )
-            if (deviceId.isNotBlank()) {
-                updates["lastModifiedByDeviceId"] = deviceId
-            }
-            collection.document(id).update(updates).await()
+            val docRef = collection.document(id)
+            firestore.runTransaction { transaction ->
+                val snapshot = transaction.get(docRef)
+                if (snapshot.exists()) {
+                    val currentVersion = snapshot.getLong("version")?.toInt() ?: 1
+                    val updates = mutableMapOf<String, Any>(
+                        "deleted" to true,
+                        "version" to currentVersion + 1,
+                        "updatedAt" to System.currentTimeMillis()
+                    )
+                    if (deviceId.isNotBlank()) {
+                        updates["lastModifiedByDeviceId"] = deviceId
+                    }
+                    transaction.update(docRef, updates)
+                }
+            }.await()
             PgResult.Success(Unit)
         } catch (e: FirebaseFirestoreException) {
-            PgResult.Failure(mapFirestoreException(e))
+            if (e.code == FirebaseFirestoreException.Code.NOT_FOUND) {
+                PgResult.Success(Unit)
+            } else {
+                PgResult.Failure(mapFirestoreException(e))
+            }
         } catch (e: Exception) {
             PgResult.Failure(PgError.UnknownError("Failed to delete payment in Firestore", e))
         }

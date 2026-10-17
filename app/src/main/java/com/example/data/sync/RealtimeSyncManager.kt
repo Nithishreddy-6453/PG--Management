@@ -150,6 +150,21 @@ class RealtimeSyncManager @Inject constructor(
                     }
                 }
             }
+
+            // 6. Observe Drive Folder Mappings across devices
+            launch {
+                firestoreTenantMediaRepository.observeFolderMappings(ownerId).collect { result ->
+                    when (result) {
+                        is PgResult.Success -> {
+                            logger.d(TAG, "Realtime snapshot: Received ${result.data.size} drive folder mappings")
+                            syncEngine.reconcileRemoteFolderMappings(result.data)
+                        }
+                        is PgResult.Failure -> {
+                            logger.w(TAG, "Folder mappings observation error: ${result.error.message}")
+                        }
+                    }
+                }
+            }
         }
     }
 

@@ -459,50 +459,85 @@ class DataIntegrityManager @Inject constructor(
             val usesLetters = referencedBedIds.any { it.matches(Regex("(?i)Bed\\s*[A-Z]")) } ||
                     existingBeds.any { it.bedId.matches(Regex("(?i)Bed\\s*[A-Z]")) }
 
-            // 2.1 Prune redundant orphaned beds if existing beds exceed canonical room.capacity
-            if (existingBeds.size > room.capacity) {
-                // Determine which beds to keep:
-                // First keep beds referenced by active tenants
-                val bedsToKeep = mutableListOf<BedEntity>()
-                val excessBeds = mutableListOf<BedEntity>()
+            // 2.1 Resolve duplicate bed slots (e.g. Bed 1 and Bed A in same room) and prune redundant excess beds
+            val bedsBySlot = existingBeds.groupBy { com.example.core.util.BedIdentityUtil.parseBedIndex(it.bedId) }
+            val excessDuplicates = mutableListOf<BedEntity>()
+            val canonicalExistingBeds = mutableListOf<BedEntity>()
 
-                for (bed in existingBeds) {
-                    if (referencedBedIds.any { it.equals(bed.bedId, ignoreCase = true) } || bed.status == "BLOCKED") {
-                        if (bedsToKeep.size < room.capacity) {
-                            bedsToKeep.add(bed)
-                        } else {
-                            excessBeds.add(bed)
-                        }
+            for ((slotIdx, slotBeds) in bedsBySlot) {
+                if (slotIdx == null) {
+                    canonicalExistingBeds.addAll(slotBeds)
+                } else if (slotBeds.size > 1) {
+                    // Conflicting beds for same physical slot (e.g. Bed 1 and Bed A)
+                    // Prefer bed referenced by active tenant or blocked status, then convention
+                    val referenced = slotBeds.firstOrNull { b ->
+                        referencedBedIds.any { com.example.core.util.BedIdentityUtil.matchesSameBed(it, b.bedId) } || b.status == "BLOCKED"
+                    } ?: (if (usesLetters) slotBeds.firstOrNull { it.bedId.matches(Regex("(?i)Bed\\s*[A-Z]")) } else slotBeds.firstOrNull { it.bedId.matches(Regex("(?i)Bed\\s*\\d+")) })
+                    ?: slotBeds.first()
+
+                    canonicalExistingBeds.add(referenced)
+                    excessDuplicates.addAll(slotBeds.filter { it.bedId != referenced.bedId })
+                } else {
+                    canonicalExistingBeds.addAll(slotBeds)
+                }
+            }
+
+            // Remove excess duplicate bed entities for the same physical slot
+            for (dup in excessDuplicates) {
+                bedDao.deleteBed(propId, room.roomNumber, dup.bedId)
+                syncCoordinator?.enqueueOperation("BED", "${propId}_${room.roomNumber}_${dup.bedId}", "DELETE")
+                repairLogs.add(
+                    RepairActionLog(
+                        propertyId = propId,
+                        roomNumber = room.roomNumber,
+                        bedId = dup.bedId,
+                        previousState = "Conflicting alias bed entity (${dup.bedId})",
+                        repairedState = "Deleted redundant alias bed entity",
+                        reason = "Resolved conflicting bed slot duplicate in Room ${room.roomNumber}",
+                        action = ResolutionAction.AUTOMATICALLY_REPAIRED
+                    )
+                )
+            }
+
+            val bedsToKeep = mutableListOf<BedEntity>()
+            val excessBeds = mutableListOf<BedEntity>()
+
+            for (bed in canonicalExistingBeds) {
+                if (referencedBedIds.any { com.example.core.util.BedIdentityUtil.matchesSameBed(it, bed.bedId) } || bed.status == "BLOCKED") {
+                    if (bedsToKeep.size < room.capacity) {
+                        bedsToKeep.add(bed)
                     } else {
                         excessBeds.add(bed)
                     }
+                } else {
+                    excessBeds.add(bed)
                 }
+            }
 
-                // If still need more beds to reach room.capacity, pick from unassigned excess
-                for (bed in excessBeds.toList()) {
-                    if (bedsToKeep.size < room.capacity && bed.status != "BLOCKED") {
-                        bedsToKeep.add(bed)
-                        excessBeds.remove(bed)
-                    }
+            // If still need more beds to reach room.capacity, pick from unassigned excess
+            for (bed in excessBeds.toList()) {
+                if (bedsToKeep.size < room.capacity && bed.status != "BLOCKED") {
+                    bedsToKeep.add(bed)
+                    excessBeds.remove(bed)
                 }
+            }
 
-                // Delete all leftover excess beds
-                for (excess in excessBeds) {
-                    bedDao.deleteBed(propId, room.roomNumber, excess.bedId)
-                    syncCoordinator?.enqueueOperation("BED", "${propId}_${room.roomNumber}_${excess.bedId}", "DELETE")
+            // Delete all leftover excess beds
+            for (excess in excessBeds) {
+                bedDao.deleteBed(propId, room.roomNumber, excess.bedId)
+                syncCoordinator?.enqueueOperation("BED", "${propId}_${room.roomNumber}_${excess.bedId}", "DELETE")
 
-                    repairLogs.add(
-                        RepairActionLog(
-                            propertyId = propId,
-                            roomNumber = room.roomNumber,
-                            bedId = excess.bedId,
-                            previousState = "Redundant BedEntity (${excess.bedId}) beyond capacity ${room.capacity}",
-                            repairedState = "Deleted redundant BedEntity",
-                            reason = "Enforced canonical room capacity (${room.capacity}); removed orphaned bed duplicate",
-                            action = ResolutionAction.AUTOMATICALLY_REPAIRED
-                        )
+                repairLogs.add(
+                    RepairActionLog(
+                        propertyId = propId,
+                        roomNumber = room.roomNumber,
+                        bedId = excess.bedId,
+                        previousState = "Redundant BedEntity (${excess.bedId}) beyond capacity ${room.capacity}",
+                        repairedState = "Deleted redundant BedEntity",
+                        reason = "Enforced canonical room capacity (${room.capacity}); removed orphaned bed duplicate",
+                        action = ResolutionAction.AUTOMATICALLY_REPAIRED
                     )
-                }
+                )
             }
 
             // 2.2 Re-query non-deleted beds for room
@@ -591,12 +626,23 @@ class DataIntegrityManager @Inject constructor(
             // 3.1 First respect existing valid assignments that link an active tenant in this room
             for (assign in roomAssignments) {
                 val bedKey = assign.bedId.lowercase()
-                val targetBed = roomBedMap[bedKey]
+                val targetBed = roomBedMap[bedKey] ?: roomBeds.firstOrNull { com.example.core.util.BedIdentityUtil.matchesSameBed(it.bedId, assign.bedId) }
                 if (targetBed != null && targetBed.status != "BLOCKED") {
+                    val canonicalKey = targetBed.bedId.lowercase()
                     val matchingTenant = activeTenantsInRoom.firstOrNull { it.id == assign.tenantId }
                     if (matchingTenant != null) {
-                        if (!assignedTenantToBed.containsKey(bedKey)) {
-                            assignedTenantToBed[bedKey] = matchingTenant.id
+                        if (!assignedTenantToBed.containsKey(canonicalKey)) {
+                            assignedTenantToBed[canonicalKey] = matchingTenant.id
+                            // Ensure assignment points to canonical bedId
+                            if (!assign.bedId.equals(targetBed.bedId, ignoreCase = true)) {
+                                val updatedAssign = assign.copy(
+                                    bedId = targetBed.bedId,
+                                    updatedAt = System.currentTimeMillis(),
+                                    syncStatus = "PENDING_UPLOAD"
+                                )
+                                bedAssignmentDao.updateAssignment(updatedAssign)
+                                syncCoordinator?.enqueueOperation("BED_ASSIGNMENT", assign.assignmentId, "UPDATE")
+                            }
                             // Ensure tenant record has matching bedId
                             if (!matchingTenant.bedId.equals(targetBed.bedId, ignoreCase = true)) {
                                 val updatedTenant = matchingTenant.copy(
@@ -643,7 +689,9 @@ class DataIntegrityManager @Inject constructor(
                 }
 
                 val requestedBedKey = tenant.bedId.trim().lowercase()
-                val candidateBed = if (requestedBedKey.isNotBlank()) roomBedMap[requestedBedKey] else null
+                val candidateBed = if (requestedBedKey.isNotBlank()) {
+                    roomBedMap[requestedBedKey] ?: roomBeds.firstOrNull { com.example.core.util.BedIdentityUtil.matchesSameBed(it.bedId, tenant.bedId) }
+                } else null
 
                 if (candidateBed != null && candidateBed.status != "BLOCKED" && !assignedTenantToBed.containsKey(candidateBed.bedId.lowercase())) {
                     // Bed requested by tenant is free: Reconstruct missing BedAssignment!
@@ -749,7 +797,8 @@ class DataIntegrityManager @Inject constructor(
             for (bed in roomBeds) {
                 if (bed.status == "BLOCKED") continue
                 val bedKey = bed.bedId.lowercase()
-                val isOccupied = assignedTenantToBed.containsKey(bedKey)
+                val isOccupied = assignedTenantToBed.containsKey(bedKey) ||
+                    assignedTenantToBed.keys.any { com.example.core.util.BedIdentityUtil.matchesSameBed(it, bed.bedId) }
 
                 if (isOccupied && bed.status != "OCCUPIED") {
                     val updatedBed = bed.copy(status = "OCCUPIED", updatedAt = System.currentTimeMillis(), syncStatus = "PENDING_UPLOAD")

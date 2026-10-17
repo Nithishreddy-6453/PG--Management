@@ -23,12 +23,23 @@ class FirestoreSettingsRepository @Inject constructor(
     suspend fun saveSettings(settingsDto: SettingsDto): PgResult<Unit> {
         return try {
             val docId = if (settingsDto.id.isNotBlank()) settingsDto.id else "settings_${currentOwnerId}"
+            val now = if (settingsDto.updatedAt > 0) settingsDto.updatedAt else System.currentTimeMillis()
             val dtoToSave = settingsDto.copy(
                 id = docId,
                 ownerId = if (settingsDto.ownerId.isNotBlank()) settingsDto.ownerId else currentOwnerId,
-                updatedAt = System.currentTimeMillis()
+                updatedAt = now
             )
-            collection.document(docId).set(dtoToSave).await()
+            val docRef = collection.document(docId)
+            firestore.runTransaction { transaction ->
+                val snapshot = transaction.get(docRef)
+                if (snapshot.exists()) {
+                    val remoteUpdatedAt = snapshot.getLong("updatedAt") ?: 0L
+                    if (remoteUpdatedAt > dtoToSave.updatedAt) {
+                        return@runTransaction
+                    }
+                }
+                transaction.set(docRef, dtoToSave)
+            }.await()
             PgResult.Success(Unit)
         } catch (e: FirebaseFirestoreException) {
             PgResult.Failure(mapFirestoreException(e))

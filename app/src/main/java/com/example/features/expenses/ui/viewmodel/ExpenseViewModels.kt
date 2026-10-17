@@ -1,11 +1,18 @@
 package com.example.features.expenses.ui.viewmodel
 
+import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.core.common.PgResult
+import com.example.data.database.PropertyDao
+import com.example.features.expenses.data.ExpenseReceiptManager
 import com.example.features.expenses.domain.model.Expense
+import com.example.features.expenses.domain.model.ExpenseAttachment
 import com.example.features.expenses.domain.model.ExpensePayment
+import com.example.features.expenses.domain.repository.ExpenseRepository
 import com.example.features.expenses.domain.usecase.*
+import com.example.features.properties.data.CurrentPropertyManager
 import com.example.features.rent.domain.util.RentBillingEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -18,6 +25,12 @@ import javax.inject.Inject
 // 1. EXPENSE LIST VIEWMODEL
 // ==========================================
 
+enum class ExpenseTimeRange {
+    THIS_MONTH,
+    LAST_3M,
+    ALL_TIME
+}
+
 data class ExpenseListUiState(
     val isLoading: Boolean = false,
     val expenses: List<Expense> = emptyList(),
@@ -27,10 +40,12 @@ data class ExpenseListUiState(
     val selectedStatus: String = "All", // "All", "Paid", "Partially Paid", "Unpaid"
     val selectedPaymentMethod: String = "All",
     val selectedBillingMonth: String = "", // e.g. "October 2026"
+    val timeRange: ExpenseTimeRange = ExpenseTimeRange.THIS_MONTH,
+    val propertyName: String = "",
     val sortBy: SortType = SortType.DATE_DESC,
     val error: String? = null,
     
-    // Financial Summary for Selected Month
+    // Financial Summary for Selected Range
     val totalExpenses: Double = 0.0,
     val paidExpenses: Double = 0.0,
     val outstandingExpenses: Double = 0.0,
@@ -47,6 +62,7 @@ sealed class ExpenseListUiEvent {
     data class StatusFilterChanged(val status: String) : ExpenseListUiEvent()
     data class MonthFilterChanged(val month: String) : ExpenseListUiEvent()
     data class PaymentMethodFilterChanged(val method: String) : ExpenseListUiEvent()
+    data class TimeRangeChanged(val timeRange: ExpenseTimeRange) : ExpenseListUiEvent()
     data class SortOrderChanged(val sortType: SortType) : ExpenseListUiEvent()
     data class TabChanged(val showRecurring: Boolean) : ExpenseListUiEvent()
     object NextMonth : ExpenseListUiEvent()
@@ -59,7 +75,9 @@ sealed class ExpenseListUiEvent {
 class ExpenseListViewModel @Inject constructor(
     private val getExpensesUseCase: GetExpensesUseCase,
     private val searchExpensesUseCase: SearchExpensesUseCase,
-    private val filterExpensesUseCase: FilterExpensesUseCase
+    private val filterExpensesUseCase: FilterExpensesUseCase,
+    private val currentPropertyManager: CurrentPropertyManager,
+    private val propertyDao: PropertyDao
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ExpenseListUiState())
@@ -68,7 +86,25 @@ class ExpenseListViewModel @Inject constructor(
     init {
         val currentBillingMonth = RentBillingEngine.formatCanonicalBillingMonth(Date())
         _state.update { it.copy(selectedBillingMonth = currentBillingMonth) }
+        loadPropertyName()
         loadExpenses()
+    }
+
+    private fun loadPropertyName() {
+        viewModelScope.launch {
+            try {
+                currentPropertyManager.currentPropertyIdFlow.collect { propId ->
+                    val effectiveId = if (propId.isNotBlank() && propId != CurrentPropertyManager.DEFAULT_PROPERTY_ID) {
+                        propId
+                    } else {
+                        currentPropertyManager.getCurrentPropertyId()
+                    }
+                    val prop = if (effectiveId.isNotBlank()) propertyDao.getProperty(effectiveId) else null
+                    val name = prop?.propertyName?.takeIf { it.isNotBlank() } ?: ""
+                    _state.update { it.copy(propertyName = name) }
+                }
+            } catch (_: Exception) {}
+        }
     }
 
     fun onEvent(event: ExpenseListUiEvent) {
@@ -86,11 +122,15 @@ class ExpenseListViewModel @Inject constructor(
                 applyFilters()
             }
             is ExpenseListUiEvent.MonthFilterChanged -> {
-                _state.update { it.copy(selectedBillingMonth = event.month) }
+                _state.update { it.copy(selectedBillingMonth = event.month, timeRange = ExpenseTimeRange.THIS_MONTH) }
                 applyFilters()
             }
             is ExpenseListUiEvent.PaymentMethodFilterChanged -> {
                 _state.update { it.copy(selectedPaymentMethod = event.method) }
+                applyFilters()
+            }
+            is ExpenseListUiEvent.TimeRangeChanged -> {
+                _state.update { it.copy(timeRange = event.timeRange) }
                 applyFilters()
             }
             is ExpenseListUiEvent.SortOrderChanged -> {
@@ -104,18 +144,18 @@ class ExpenseListViewModel @Inject constructor(
             ExpenseListUiEvent.NextMonth -> {
                 val current = _state.value.selectedBillingMonth
                 val next = RentBillingEngine.getNextBillingMonth(current)
-                _state.update { it.copy(selectedBillingMonth = next) }
+                _state.update { it.copy(selectedBillingMonth = next, timeRange = ExpenseTimeRange.THIS_MONTH) }
                 applyFilters()
             }
             ExpenseListUiEvent.PreviousMonth -> {
                 val current = _state.value.selectedBillingMonth
                 val prev = RentBillingEngine.getPreviousBillingMonth(current)
-                _state.update { it.copy(selectedBillingMonth = prev) }
+                _state.update { it.copy(selectedBillingMonth = prev, timeRange = ExpenseTimeRange.THIS_MONTH) }
                 applyFilters()
             }
             ExpenseListUiEvent.CurrentMonth -> {
                 val now = RentBillingEngine.formatCanonicalBillingMonth(Date())
-                _state.update { it.copy(selectedBillingMonth = now) }
+                _state.update { it.copy(selectedBillingMonth = now, timeRange = ExpenseTimeRange.THIS_MONTH) }
                 applyFilters()
             }
             ExpenseListUiEvent.Retry -> {
@@ -144,34 +184,55 @@ class ExpenseListViewModel @Inject constructor(
 
     private fun applyFilters() {
         val currentList = _state.value.expenses
+        val timeRange = _state.value.timeRange
         val billingMonth = _state.value.selectedBillingMonth
         val parsedMonth = RentBillingEngine.parseBillingMonth(billingMonth)
-        val monthPrefix = String.format("%04d-%02d", parsedMonth.year, parsedMonth.month1Based)
+        val monthPrefix = String.format(Locale.US, "%04d-%02d", parsedMonth.year, parsedMonth.month1Based)
 
-        // Filter by selected billing month first
-        val monthExpenses = currentList.filter {
-            it.date.startsWith(monthPrefix) || it.date.contains(parsedMonth.canonicalName, ignoreCase = true)
+        val timeFilteredExpenses = when (timeRange) {
+            ExpenseTimeRange.THIS_MONTH -> {
+                currentList.filter {
+                    it.date.startsWith(monthPrefix) || it.date.contains(parsedMonth.canonicalName, ignoreCase = true)
+                }
+            }
+            ExpenseTimeRange.LAST_3M -> {
+                val m1 = billingMonth
+                val m2 = RentBillingEngine.getPreviousBillingMonth(m1)
+                val m3 = RentBillingEngine.getPreviousBillingMonth(m2)
+                val p1 = RentBillingEngine.parseBillingMonth(m1)
+                val p2 = RentBillingEngine.parseBillingMonth(m2)
+                val p3 = RentBillingEngine.parseBillingMonth(m3)
+                val prefixes = listOf(
+                    String.format(Locale.US, "%04d-%02d", p1.year, p1.month1Based),
+                    String.format(Locale.US, "%04d-%02d", p2.year, p2.month1Based),
+                    String.format(Locale.US, "%04d-%02d", p3.year, p3.month1Based)
+                )
+                val names = listOf(p1.canonicalName, p2.canonicalName, p3.canonicalName)
+                currentList.filter { exp ->
+                    prefixes.any { exp.date.startsWith(it) } || names.any { exp.date.contains(it, ignoreCase = true) }
+                }
+            }
+            ExpenseTimeRange.ALL_TIME -> currentList
         }
 
-        // Compute Financial Totals for this selected billing month
-        val totalAmount = monthExpenses.sumOf { it.amount }
-        val paidAmount = monthExpenses.sumOf { it.paidAmount }
-        val outstandingAmount = monthExpenses.sumOf { it.remainingAmount }
-        val count = monthExpenses.size
-        val breakdown = monthExpenses.groupBy { it.category }
+        // Compute Financial Totals for this selected time window
+        val totalAmount = timeFilteredExpenses.sumOf { it.amount }
+        val paidAmount = timeFilteredExpenses.sumOf { it.paidAmount }
+        val outstandingAmount = timeFilteredExpenses.sumOf { it.remainingAmount }
+        val count = timeFilteredExpenses.size
+        val breakdown = timeFilteredExpenses.groupBy { it.category }
             .mapValues { entry -> entry.value.sumOf { it.amount } }
 
-        // Now filter by category, status, payment method, query
         val listToFilter = if (_state.value.showRecurringTab) {
             currentList.filter { it.isRecurring }
         } else {
-            monthExpenses
+            timeFilteredExpenses
         }
 
         val filtered = filterExpensesUseCase(
             expenses = listToFilter,
             category = _state.value.selectedCategory,
-            month = null, // Already filtered by monthPrefix
+            month = null, // Already filtered by time window
             paymentMethod = _state.value.selectedPaymentMethod,
             paymentStatus = _state.value.selectedStatus,
             sortBy = _state.value.sortBy
@@ -201,11 +262,13 @@ data class ExpenseDetailsUiState(
     val isLoading: Boolean = false,
     val expense: Expense? = null,
     val error: String? = null,
-    val isRecordingPayment: Boolean = false
+    val isRecordingPayment: Boolean = false,
+    val isRetryingUpload: Boolean = false
 )
 
 sealed class ExpenseDetailsUiEvent {
     object DeleteExpense : ExpenseDetailsUiEvent()
+    object RetryReceiptUpload : ExpenseDetailsUiEvent()
     data class RecordPayment(
         val amount: Double,
         val paymentDate: String,
@@ -225,6 +288,8 @@ class ExpenseDetailsViewModel @Inject constructor(
     private val getExpenseDetailsUseCase: GetExpenseDetailsUseCase,
     private val deleteExpenseUseCase: DeleteExpenseUseCase,
     private val recordExpensePaymentUseCase: RecordExpensePaymentUseCase,
+    private val expenseRepository: ExpenseRepository,
+    val expenseReceiptManager: ExpenseReceiptManager,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -237,7 +302,14 @@ class ExpenseDetailsViewModel @Inject constructor(
     private var expenseId: Int = -1
 
     init {
-        expenseId = savedStateHandle.get<String>("expenseId")?.toIntOrNull() ?: -1
+        expenseId = savedStateHandle.get<Any>("expenseId")?.let { raw ->
+            when (raw) {
+                is Int -> raw
+                is Number -> raw.toInt()
+                is String -> raw.toIntOrNull() ?: -1
+                else -> -1
+            }
+        } ?: -1
         if (expenseId != -1) {
             loadExpenseDetails(expenseId)
         } else {
@@ -274,6 +346,24 @@ class ExpenseDetailsViewModel @Inject constructor(
                     }
                 }
             }
+            ExpenseDetailsUiEvent.RetryReceiptUpload -> {
+                viewModelScope.launch {
+                    try {
+                        _state.update { it.copy(isRetryingUpload = true) }
+                        val res = expenseRepository.retryReceiptUpload(expenseId)
+                        _state.update { it.copy(isRetryingUpload = false) }
+                        if (res is PgResult.Success) {
+                            _state.update { it.copy(expense = res.data) }
+                            _effects.emit(ExpenseDetailsUiEffect.ShowToast("Receipt uploaded successfully to Google Drive"))
+                        } else if (res is PgResult.Failure) {
+                            _effects.emit(ExpenseDetailsUiEffect.ShowToast("Upload failed: ${res.error.message}"))
+                        }
+                    } catch (e: Exception) {
+                        _state.update { it.copy(isRetryingUpload = false) }
+                        _effects.emit(ExpenseDetailsUiEffect.ShowToast("Upload retry error: ${e.message}"))
+                    }
+                }
+            }
             is ExpenseDetailsUiEvent.RecordPayment -> {
                 viewModelScope.launch {
                     try {
@@ -307,14 +397,16 @@ class ExpenseDetailsViewModel @Inject constructor(
 
 data class AddExpenseUiState(
     val title: String = "",
-    val category: String = "Electricity",
+    val category: String = "Electricity Bill",
     val amount: String = "",
     val date: String = "",
+    val propertyName: String = "Sri Lakshmi Residency",
+    val room: String = "Select room",
     val vendor: String = "",
     val notes: String = "",
     
     // Payment Status & Details
-    val paymentStatus: String = "Paid", // "Paid" or "Unpaid"
+    val paymentStatus: String = "Paid", // "Paid", "Pending", "Partially Paid"
     val paymentDate: String = "",
     val paymentMethod: String = "UPI",
     val paymentReference: String = "",
@@ -324,6 +416,10 @@ data class AddExpenseUiState(
     val recurringFrequency: String = "Monthly", // "Monthly" or "Yearly"
     val recurringStartDate: String = "",
     val recurringEndDate: String = "",
+    val endType: String = "No end date", // "No end date", "End on date", "End after a number of times"
+    val selectedAttachment: ExpenseAttachment? = null,
+    val isPreparingAttachment: Boolean = false,
+    val receiptUploadError: String? = null,
     
     val isLoading: Boolean = false,
     val validationError: String? = null,
@@ -335,6 +431,8 @@ sealed class AddExpenseUiEvent {
     data class CategoryChanged(val category: String) : AddExpenseUiEvent()
     data class AmountChanged(val amount: String) : AddExpenseUiEvent()
     data class DateChanged(val date: String) : AddExpenseUiEvent()
+    data class PropertyChanged(val property: String) : AddExpenseUiEvent()
+    data class RoomChanged(val room: String) : AddExpenseUiEvent()
     data class VendorChanged(val vendor: String) : AddExpenseUiEvent()
     data class NotesChanged(val notes: String) : AddExpenseUiEvent()
     data class PaymentStatusChanged(val status: String) : AddExpenseUiEvent()
@@ -344,7 +442,11 @@ sealed class AddExpenseUiEvent {
     data class RecurringToggled(val isRecurring: Boolean) : AddExpenseUiEvent()
     data class RecurringFrequencyChanged(val freq: String) : AddExpenseUiEvent()
     data class RecurringEndDateChanged(val date: String) : AddExpenseUiEvent()
+    data class EndTypeChanged(val endType: String) : AddExpenseUiEvent()
+    data class AttachReceiptUri(val uri: Uri, val mimeType: String? = null, val source: String = "UPLOAD") : AddExpenseUiEvent()
+    object RemoveReceipt : AddExpenseUiEvent()
     object SaveExpense : AddExpenseUiEvent()
+    object ResetSuccess : AddExpenseUiEvent()
 }
 
 sealed class AddExpenseUiEffect {
@@ -355,7 +457,8 @@ sealed class AddExpenseUiEffect {
 @HiltViewModel
 class AddExpenseViewModel @Inject constructor(
     private val addExpenseUseCase: AddExpenseUseCase,
-    private val validateExpenseUseCase: ValidateExpenseUseCase
+    private val validateExpenseUseCase: ValidateExpenseUseCase,
+    private val expenseReceiptManager: ExpenseReceiptManager
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(AddExpenseUiState())
@@ -381,6 +484,8 @@ class AddExpenseViewModel @Inject constructor(
             is AddExpenseUiEvent.CategoryChanged -> _state.update { it.copy(category = event.category) }
             is AddExpenseUiEvent.AmountChanged -> _state.update { it.copy(amount = event.amount) }
             is AddExpenseUiEvent.DateChanged -> _state.update { it.copy(date = event.date) }
+            is AddExpenseUiEvent.PropertyChanged -> _state.update { it.copy(propertyName = event.property) }
+            is AddExpenseUiEvent.RoomChanged -> _state.update { it.copy(room = event.room) }
             is AddExpenseUiEvent.VendorChanged -> _state.update { it.copy(vendor = event.vendor) }
             is AddExpenseUiEvent.NotesChanged -> _state.update { it.copy(notes = event.notes) }
             is AddExpenseUiEvent.PaymentStatusChanged -> _state.update { it.copy(paymentStatus = event.status) }
@@ -390,6 +495,30 @@ class AddExpenseViewModel @Inject constructor(
             is AddExpenseUiEvent.RecurringToggled -> _state.update { it.copy(isRecurring = event.isRecurring) }
             is AddExpenseUiEvent.RecurringFrequencyChanged -> _state.update { it.copy(recurringFrequency = event.freq) }
             is AddExpenseUiEvent.RecurringEndDateChanged -> _state.update { it.copy(recurringEndDate = event.date) }
+            is AddExpenseUiEvent.EndTypeChanged -> _state.update { it.copy(endType = event.endType) }
+            is AddExpenseUiEvent.AttachReceiptUri -> {
+                _state.update { it.copy(isPreparingAttachment = true, receiptUploadError = null) }
+                viewModelScope.launch {
+                    val res = expenseReceiptManager.prepareLocalAttachment(
+                        uri = event.uri,
+                        category = _state.value.category,
+                        mimeTypeInput = event.mimeType,
+                        source = event.source
+                    )
+                    if (res is PgResult.Success) {
+                        _state.update { it.copy(selectedAttachment = res.data, isPreparingAttachment = false) }
+                    } else if (res is PgResult.Failure) {
+                        _state.update { it.copy(isPreparingAttachment = false, receiptUploadError = res.error.message) }
+                    }
+                }
+            }
+            AddExpenseUiEvent.RemoveReceipt -> {
+                _state.update { it.copy(selectedAttachment = null, receiptUploadError = null) }
+            }
+            AddExpenseUiEvent.ResetSuccess -> {
+                val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+                _state.value = AddExpenseUiState(date = todayStr, paymentDate = todayStr, recurringStartDate = todayStr)
+            }
             AddExpenseUiEvent.SaveExpense -> saveExpense()
         }
     }
@@ -397,7 +526,7 @@ class AddExpenseViewModel @Inject constructor(
     private fun saveExpense() {
         val currentState = _state.value
         val validationResult = validateExpenseUseCase(
-            title = currentState.title,
+            title = currentState.title.ifBlank { currentState.category },
             category = currentState.category,
             amount = currentState.amount,
             date = currentState.date
@@ -411,11 +540,11 @@ class AddExpenseViewModel @Inject constructor(
                 _state.update { it.copy(isLoading = true, validationError = null) }
                 viewModelScope.launch {
                     try {
-                        val parsedAmount = currentState.amount.toDouble()
+                        val parsedAmount = currentState.amount.toDoubleOrNull() ?: 0.0
                         val isPaid = currentState.paymentStatus.equals("Paid", ignoreCase = true)
                         val paidAmount = if (isPaid) parsedAmount else 0.0
                         val remainingAmount = if (isPaid) 0.0 else parsedAmount
-                        val status = if (isPaid) "Paid" else "Unpaid"
+                        val status = if (isPaid) "Paid" else if (currentState.paymentStatus.equals("Partially Paid", ignoreCase = true)) "Partially Paid" else "Unpaid"
 
                         val initialPayments = if (isPaid) {
                             listOf(
@@ -431,7 +560,7 @@ class AddExpenseViewModel @Inject constructor(
                         } else emptyList()
 
                         val newExpense = Expense(
-                            title = currentState.title.trim(),
+                            title = currentState.title.trim().ifBlank { currentState.category },
                             category = currentState.category,
                             amount = parsedAmount,
                             paidAmount = paidAmount,
@@ -447,13 +576,12 @@ class AddExpenseViewModel @Inject constructor(
                             recurringStartDate = if (currentState.isRecurring) currentState.date else null,
                             recurringEndDate = if (currentState.isRecurring) currentState.recurringEndDate.ifBlank { null } else null,
                             recurringExpenseId = if (currentState.isRecurring) "rec_${UUID.randomUUID()}" else null,
-                            payments = initialPayments
+                            payments = initialPayments,
+                            receiptAttachment = currentState.selectedAttachment
                         )
 
                         addExpenseUseCase(newExpense)
                         _state.update { it.copy(isLoading = false, isSuccess = true) }
-                        _effects.emit(AddExpenseUiEffect.ShowMessage("Expense added successfully"))
-                        _effects.emit(AddExpenseUiEffect.NavigateBack)
                     } catch (e: Exception) {
                         _state.update { it.copy(isLoading = false, validationError = e.message) }
                     }
@@ -480,6 +608,9 @@ data class EditExpenseUiState(
     val status: String = "Paid",
     val paidAmount: Double = 0.0,
     val remainingAmount: Double = 0.0,
+    val selectedAttachment: ExpenseAttachment? = null,
+    val isPreparingAttachment: Boolean = false,
+    val receiptUploadError: String? = null,
     val isLoading: Boolean = false,
     val isFetching: Boolean = false,
     val validationError: String? = null,
@@ -496,6 +627,8 @@ sealed class EditExpenseUiEvent {
     data class PaymentMethodChanged(val method: String) : EditExpenseUiEvent()
     data class VendorChanged(val vendor: String) : EditExpenseUiEvent()
     data class NotesChanged(val notes: String) : EditExpenseUiEvent()
+    data class AttachReceiptUri(val uri: Uri, val mimeType: String? = null, val source: String = "UPLOAD") : EditExpenseUiEvent()
+    object RemoveReceipt : EditExpenseUiEvent()
     object SaveExpense : EditExpenseUiEvent()
 }
 
@@ -509,6 +642,7 @@ class EditExpenseViewModel @Inject constructor(
     private val getExpenseDetailsUseCase: GetExpenseDetailsUseCase,
     private val updateExpenseUseCase: UpdateExpenseUseCase,
     private val validateExpenseUseCase: ValidateExpenseUseCase,
+    private val expenseReceiptManager: ExpenseReceiptManager,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -521,7 +655,14 @@ class EditExpenseViewModel @Inject constructor(
     private var originalExpense: Expense? = null
 
     init {
-        val id = savedStateHandle.get<String>("expenseId")?.toIntOrNull() ?: -1
+        val id = savedStateHandle.get<Any>("expenseId")?.let { raw ->
+            when (raw) {
+                is Int -> raw
+                is Number -> raw.toInt()
+                is String -> raw.toIntOrNull() ?: -1
+                else -> -1
+            }
+        } ?: -1
         if (id != -1) {
             _state.update { it.copy(expenseId = id) }
             fetchExpenseDetails(id)
@@ -550,6 +691,7 @@ class EditExpenseViewModel @Inject constructor(
                             status = expense.status,
                             paidAmount = expense.paidAmount,
                             remainingAmount = expense.remainingAmount,
+                            selectedAttachment = expense.receiptAttachment,
                             existingPayments = expense.payments
                         )
                     }
@@ -571,6 +713,25 @@ class EditExpenseViewModel @Inject constructor(
             is EditExpenseUiEvent.PaymentMethodChanged -> _state.update { it.copy(paymentMethod = event.method) }
             is EditExpenseUiEvent.VendorChanged -> _state.update { it.copy(vendor = event.vendor) }
             is EditExpenseUiEvent.NotesChanged -> _state.update { it.copy(notes = event.notes) }
+            is EditExpenseUiEvent.AttachReceiptUri -> {
+                _state.update { it.copy(isPreparingAttachment = true, receiptUploadError = null) }
+                viewModelScope.launch {
+                    val res = expenseReceiptManager.prepareLocalAttachment(
+                        uri = event.uri,
+                        category = _state.value.category,
+                        mimeTypeInput = event.mimeType,
+                        source = event.source
+                    )
+                    if (res is PgResult.Success) {
+                        _state.update { it.copy(selectedAttachment = res.data, isPreparingAttachment = false) }
+                    } else if (res is PgResult.Failure) {
+                        _state.update { it.copy(isPreparingAttachment = false, receiptUploadError = res.error.message) }
+                    }
+                }
+            }
+            EditExpenseUiEvent.RemoveReceipt -> {
+                _state.update { it.copy(selectedAttachment = null, receiptUploadError = null) }
+            }
             EditExpenseUiEvent.SaveExpense -> saveExpense()
         }
     }
@@ -616,7 +777,8 @@ class EditExpenseViewModel @Inject constructor(
                             date = currentState.date,
                             paymentMethod = currentState.paymentMethod,
                             vendor = currentState.vendor.trim().ifBlank { null },
-                            notes = currentState.notes.trim()
+                            notes = currentState.notes.trim(),
+                            receiptAttachment = currentState.selectedAttachment
                         )
 
                         updateExpenseUseCase(updated)

@@ -416,4 +416,178 @@ class MultiDeviceSyncTest {
         assertEquals(1, localEntity.version)
         assertFalse(localEntity.deleted)
     }
+
+    @Test
+    fun testO_staleRetryCannotOverwriteNewerRemoteData() {
+        val remoteNewerRoom = RoomDto(
+            id = "101",
+            ownerId = "owner_test",
+            roomNumber = "101",
+            version = 4,
+            updatedAt = 5000L,
+            lastModifiedByDeviceId = deviceA
+        )
+        val staleLocalRetry = RoomEntity(
+            roomNumber = "101",
+            floor = "1st Floor",
+            capacity = 2,
+            version = 2,
+            updatedAt = 2000L,
+            syncStatus = "PENDING_UPLOAD"
+        )
+        val decision = conflictResolver.resolve(
+            localUpdatedAt = staleLocalRetry.updatedAt,
+            localVersion = staleLocalRetry.version,
+            localStatus = staleLocalRetry.syncStatus,
+            remoteUpdatedAt = remoteNewerRoom.updatedAt,
+            remoteVersion = remoteNewerRoom.version,
+            localData = staleLocalRetry,
+            remoteData = remoteNewerRoom,
+            entityName = "Room 101",
+            remoteDeviceId = remoteNewerRoom.lastModifiedByDeviceId,
+            localDeviceId = deviceB
+        )
+        // Stale retry must not overwrite newer remote version
+        assertTrue(decision is ConflictResult.ConflictDetected || decision is ConflictResult.UseRemote)
+        assertFalse(decision is ConflictResult.UseLocal)
+    }
+
+    @Test
+    fun testP_deletedRecordCannotBeResurrectedByOlderQueuedWrite() {
+        val remoteDeletedRoom = RoomDto(
+            id = "102",
+            ownerId = "owner_test",
+            roomNumber = "102",
+            deleted = true,
+            version = 3,
+            updatedAt = 4000L,
+            lastModifiedByDeviceId = deviceA
+        )
+        val staleQueuedEdit = RoomEntity(
+            roomNumber = "102",
+            floor = "1st Floor",
+            capacity = 2,
+            deleted = false,
+            version = 1,
+            updatedAt = 1000L,
+            syncStatus = "PENDING_UPLOAD"
+        )
+        val decision = conflictResolver.resolve(
+            localUpdatedAt = staleQueuedEdit.updatedAt,
+            localVersion = staleQueuedEdit.version,
+            localStatus = staleQueuedEdit.syncStatus,
+            remoteUpdatedAt = remoteDeletedRoom.updatedAt,
+            remoteVersion = remoteDeletedRoom.version,
+            localData = staleQueuedEdit,
+            remoteData = remoteDeletedRoom,
+            entityName = "Room 102",
+            remoteDeviceId = remoteDeletedRoom.lastModifiedByDeviceId,
+            localDeviceId = deviceB
+        )
+        // Older queued write must not resurrect deleted record as clean local
+        assertFalse("Stale queued write must not overwrite or resurrect tombstone", decision is ConflictResult.UseLocal)
+    }
+
+    @Test
+    fun testQ_repeatedSyncOperationIsIdempotent() {
+        val originalRoom = RoomEntity(
+            roomNumber = "103",
+            floor = "1st Floor",
+            capacity = 2,
+            version = 2,
+            updatedAt = 3000L,
+            syncStatus = "SYNCED"
+        )
+        val dtoAttempt1 = originalRoom.toDto(ownerId = "owner_test", deviceId = deviceA)
+        val dtoAttempt2 = originalRoom.toDto(ownerId = "owner_test", deviceId = deviceA)
+
+        // Repeating the same sync operation produces identical document ID, version, and content
+        assertEquals(dtoAttempt1.id, dtoAttempt2.id)
+        assertEquals(dtoAttempt1.version, dtoAttempt2.version)
+        assertEquals(dtoAttempt1.roomNumber, dtoAttempt2.roomNumber)
+        assertEquals(dtoAttempt1.capacity, dtoAttempt2.capacity)
+        assertEquals(dtoAttempt1.lastModifiedByDeviceId, dtoAttempt2.lastModifiedByDeviceId)
+    }
+
+    @Test
+    fun testR_tenantStableCloudId_preservedAcrossMappersAndRetries() {
+        val stableId = "tenant_550e8400-e29b-41d4-a716-446655440000"
+        val tenant = TenantEntity(
+            id = 15,
+            cloudId = stableId,
+            name = "Anil Verma",
+            phone = "9876543210",
+            email = "anil@example.com",
+            emergencyContact = "9123456789",
+            roomNumber = "101",
+            bedId = "Bed 1",
+            monthlyRent = 6000.0,
+            securityDeposit = 6000.0,
+            moveInDate = "2026-10-01",
+            isKycUploaded = false,
+            kycDocType = "None"
+        )
+
+        val dto1 = tenant.toDto(ownerId = "owner_123", deviceId = deviceA)
+        val dto2 = tenant.toDto(ownerId = "owner_123", deviceId = deviceA)
+
+        // Retrying upload yields identical stable cloud document ID
+        assertEquals(stableId, dto1.cloudId)
+        assertEquals(stableId, dto1.id)
+        assertEquals(dto1.id, dto2.id)
+
+        // When restored back on another device (where local id is 0)
+        val restoredOnDeviceB = dto1.toEntity()
+        assertEquals(stableId, restoredOnDeviceB.cloudId)
+    }
+
+    @Test
+    fun testS_paymentCarriesStableTenantCloudId() {
+        val paymentCloudId = "payment_uuid_9999"
+        val tenantCloudId = "tenant_uuid_8888"
+        val payment = com.example.data.database.RentPaymentEntity(
+            id = 25,
+            cloudId = paymentCloudId,
+            tenantId = 15,
+            tenantName = "Anil Verma",
+            roomNumber = "101",
+            billingMonth = "October 2026",
+            amount = 6000.0,
+            amountPaid = 6000.0,
+            dueDate = "2026-10-05",
+            paymentDate = "2026-10-04",
+            paymentMode = "UPI",
+            status = "Paid"
+        )
+
+        val dto = payment.toDto(ownerId = "owner_123", deviceId = deviceA, tenantCloudId = tenantCloudId)
+        assertEquals(paymentCloudId, dto.id)
+        assertEquals(paymentCloudId, dto.cloudId)
+        assertEquals(tenantCloudId, dto.tenantCloudId)
+
+        val restoredEntity = dto.toEntity()
+        assertEquals(paymentCloudId, restoredEntity.cloudId)
+    }
+
+    @Test
+    fun testT_expenseStableCloudId_preservedAcrossMappers() {
+        val expenseCloudId = "expense_uuid_7777"
+        val expense = com.example.data.database.ExpenseEntity(
+            id = 12,
+            cloudId = expenseCloudId,
+            amount = 450.0,
+            category = "Plumbing",
+            date = "2026-10-07",
+            notes = "Tap washer replaced"
+        )
+
+        val dto1 = expense.toDto(ownerId = "owner_123", deviceId = deviceA)
+        val dto2 = expense.toDto(ownerId = "owner_123", deviceId = deviceA)
+        assertEquals(expenseCloudId, dto1.id)
+        assertEquals(expenseCloudId, dto1.cloudId)
+        assertEquals(dto1.id, dto2.id)
+
+        val restored = dto1.toEntity()
+        assertEquals(expenseCloudId, restored.cloudId)
+    }
 }

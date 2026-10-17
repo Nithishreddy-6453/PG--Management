@@ -72,6 +72,18 @@ class PendingRegistrationsViewModel @Inject constructor(
     private val _actionMessage = MutableStateFlow<String?>(null)
     private val _errorMessage = MutableStateFlow<String?>(null)
 
+    init {
+        viewModelScope.launch {
+            currentPropertyManager.currentPropertyIdFlow.collect { propId ->
+                if (propId.isNotBlank() && authManager.hasResponsesScope()) {
+                    try {
+                        syncFormResponsesUseCase(propId)
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+    }
+
     private data class QueryFilter(
         val tab: RegistrationFilterTab,
         val query: String

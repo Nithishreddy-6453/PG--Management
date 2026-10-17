@@ -134,6 +134,12 @@ object DatabaseModule {
 
     @Provides
     fun provideBedAssignmentDao(database: AppDatabase): com.example.data.database.BedAssignmentDao = database.bedAssignmentDao()
+
+    @Provides
+    fun provideFormAccessRequestDao(database: AppDatabase): com.example.data.database.FormAccessRequestDao = database.formAccessRequestDao()
+
+    @Provides
+    fun provideFormVersionHistoryDao(database: AppDatabase): com.example.data.database.FormVersionHistoryDao = database.formVersionHistoryDao()
 }
 
 @Module
@@ -170,6 +176,7 @@ object RepositoryModule {
     @Provides
     @Singleton
     fun provideTenantRepository(
+        database: AppDatabase,
         roomDao: RoomDao,
         tenantDao: TenantDao,
         rentPaymentDao: RentPaymentDao,
@@ -178,7 +185,7 @@ object RepositoryModule {
         currentPropertyManager: CurrentPropertyManager,
         syncCoordinator: SyncCoordinator
     ): com.example.features.tenants.domain.repository.TenantRepository {
-        return com.example.features.tenants.data.repository.TenantRepositoryImpl(roomDao, tenantDao, rentPaymentDao, bedDao, bedAssignmentDao, currentPropertyManager, syncCoordinator)
+        return com.example.features.tenants.data.repository.TenantRepositoryImpl(roomDao, tenantDao, rentPaymentDao, bedDao, bedAssignmentDao, currentPropertyManager, syncCoordinator, database)
     }
 
     @Provides
@@ -224,7 +231,8 @@ object RepositoryModule {
         currentPropertyManager: CurrentPropertyManager,
         currentBillingMonthManager: com.example.features.rent.domain.util.CurrentBillingMonthManager,
         syncCoordinator: SyncCoordinator,
-        excelDriveBackupManager: com.example.features.excel.data.ExcelDriveBackupManager
+        excelDriveBackupManager: com.example.features.excel.data.ExcelDriveBackupManager,
+        database: AppDatabase
     ): com.example.features.rent.domain.repository.RentRepository {
         return com.example.features.rent.data.repository.RentRepositoryImpl(
             rentPaymentDao,
@@ -232,6 +240,7 @@ object RepositoryModule {
             propertyDao,
             currentPropertyManager,
             currentBillingMonthManager,
+            database,
             syncCoordinator,
             excelDriveBackupManager
         )
@@ -242,9 +251,10 @@ object RepositoryModule {
     fun provideExpenseRepository(
         expenseDao: ExpenseDao,
         currentPropertyManager: CurrentPropertyManager,
+        expenseReceiptManager: com.example.features.expenses.data.ExpenseReceiptManager,
         syncCoordinator: SyncCoordinator
     ): com.example.features.expenses.domain.repository.ExpenseRepository {
-        return com.example.features.expenses.data.repository.ExpenseRepositoryImpl(expenseDao, currentPropertyManager, syncCoordinator)
+        return com.example.features.expenses.data.repository.ExpenseRepositoryImpl(expenseDao, currentPropertyManager, expenseReceiptManager, syncCoordinator)
     }
 
     @Provides

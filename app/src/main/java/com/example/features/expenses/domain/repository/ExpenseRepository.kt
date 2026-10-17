@@ -12,4 +12,6 @@ interface ExpenseRepository {
     suspend fun deleteExpense(id: Int)
     suspend fun recordPayment(expenseId: Int, payment: ExpensePayment)
     suspend fun generateRecurringExpenses(expense: Expense, monthsCount: Int = 3)
+    suspend fun retryReceiptUpload(expenseId: Int): com.example.core.common.PgResult<Expense>
 }
+

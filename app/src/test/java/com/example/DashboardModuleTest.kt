@@ -225,4 +225,61 @@ class DashboardModuleTest {
         val state = viewModel.uiState.first { it is DashboardUiState.Empty }
         assertTrue(state is DashboardUiState.Empty)
     }
+
+    @Test
+    fun testRecentActivityReactivityAndPersistence() = runTest {
+        // 1. Insert property 1 and property 2
+        val prop1 = PropertyEntity(propertyId = "prop_1", propertyName = "Property 1", isActive = true)
+        val prop2 = PropertyEntity(propertyId = "prop_2", propertyName = "Property 2", isActive = false)
+        db.propertyDao().insertProperty(prop1)
+        db.propertyDao().insertProperty(prop2)
+
+        currentPropertyManager.setCurrentPropertyId("prop_1")
+
+        // 2. Insert expense for prop_1
+        val exp1 = ExpenseEntity(
+            id = 1,
+            amount = 1000.0,
+            category = "Water",
+            date = "2026-07-01",
+            notes = "",
+            propertyId = "prop_1"
+        )
+        expenseDao.insertExpense(exp1)
+
+        val recentActivityUseCase = RecentActivityUseCase(repository)
+        val activities1 = recentActivityUseCase().first()
+        assertEquals(1, activities1.size)
+        assertEquals("Water", activities1[0].param1)
+
+        // 3. Insert newer expense for prop_1 and verify DAO flow emits updated data
+        val exp2 = ExpenseEntity(
+            id = 2,
+            amount = 2000.0,
+            category = "Electricity",
+            date = "2026-07-15",
+            notes = "",
+            propertyId = "prop_1"
+        )
+        expenseDao.insertExpense(exp2)
+
+        val activities2 = recentActivityUseCase().first()
+        assertEquals(2, activities2.size)
+        val newestActivity = activities2.first()
+        assertEquals("Electricity", newestActivity.param1)
+
+        // 4. Edit an activity's date (update expense 1 date to 2026-07-20)
+        val updatedExp1 = exp1.copy(date = "2026-07-20")
+        expenseDao.updateExpense(updatedExp1)
+
+        val activities3 = recentActivityUseCase().first()
+        // Now exp1 (July 20) should be newest and appear first
+        assertEquals("Water", activities3.first().param1)
+
+        // 5. Switch active property to prop_2 (which has no expenses)
+        currentPropertyManager.setCurrentPropertyId("prop_2")
+        val activitiesProp2 = recentActivityUseCase().first()
+        assertTrue(activitiesProp2.isEmpty())
+    }
 }
+

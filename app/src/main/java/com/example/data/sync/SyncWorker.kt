@@ -100,7 +100,7 @@ class SyncWorker @AssistedInject constructor(
 
                 WorkManager.getInstance(context).enqueueUniqueWork(
                     ONE_TIME_WORK_NAME,
-                    ExistingWorkPolicy.KEEP,
+                    ExistingWorkPolicy.APPEND_OR_REPLACE,
                     oneTimeRequest
                 )
             } catch (e: Exception) {

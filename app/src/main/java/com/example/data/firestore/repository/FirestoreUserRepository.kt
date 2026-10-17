@@ -23,12 +23,23 @@ class FirestoreUserRepository @Inject constructor(
     suspend fun saveUser(userDto: UserDto): PgResult<Unit> {
         return try {
             val docId = if (userDto.id.isNotBlank()) userDto.id else currentOwnerId
+            val now = if (userDto.updatedAt > 0) userDto.updatedAt else System.currentTimeMillis()
             val dtoToSave = userDto.copy(
                 id = docId,
                 ownerId = docId,
-                updatedAt = System.currentTimeMillis()
+                updatedAt = now
             )
-            collection.document(docId).set(dtoToSave).await()
+            val docRef = collection.document(docId)
+            firestore.runTransaction { transaction ->
+                val snapshot = transaction.get(docRef)
+                if (snapshot.exists()) {
+                    val remoteUpdatedAt = snapshot.getLong("updatedAt") ?: 0L
+                    if (remoteUpdatedAt > dtoToSave.updatedAt) {
+                        return@runTransaction
+                    }
+                }
+                transaction.set(docRef, dtoToSave)
+            }.await()
             PgResult.Success(Unit)
         } catch (e: FirebaseFirestoreException) {
             PgResult.Failure(mapFirestoreException(e))

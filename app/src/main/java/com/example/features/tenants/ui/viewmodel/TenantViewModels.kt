@@ -15,6 +15,8 @@ import com.example.features.tenants.domain.model.TenantMedia
 import com.example.features.tenants.domain.model.UploadPhotoProgress
 import com.example.features.tenants.domain.repository.TenantRepository
 import com.example.features.tenants.domain.usecase.*
+import com.example.features.googleform.domain.usecase.GetPendingRegistrationDetailsUseCase
+import com.example.features.googleform.domain.usecase.AcceptPendingTenantUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -157,7 +159,9 @@ sealed interface TenantDetailsUiState {
     data class Success(
         val tenant: TenantEntity,
         val payments: List<RentPaymentEntity>,
+        val property: com.example.data.database.PropertyEntity? = null,
         val profilePhoto: TenantMedia? = null,
+        val documents: List<TenantMedia> = emptyList(),
         val uploadProgress: UploadPhotoProgress = UploadPhotoProgress.Idle,
         val isPhotoUploading: Boolean = false,
         val isPhotoDownloading: Boolean = false,
@@ -181,18 +185,26 @@ class TenantDetailsViewModel @Inject constructor(
     private val deleteTenantUseCase: DeleteTenantUseCase,
     private val updateLeavingDateUseCase: UpdateLeavingDateUseCase,
     private val repository: TenantRepository,
+    private val tenantMediaRepository: com.example.features.tenants.domain.repository.TenantMediaRepository,
     private val getTenantLedgerUseCase: com.example.features.rent.domain.usecase.GetTenantLedgerUseCase,
     private val getTenantProfilePhotoUseCase: GetTenantProfilePhotoUseCase,
     private val uploadTenantProfilePhotoUseCase: UploadTenantProfilePhotoUseCase,
     private val deleteTenantProfilePhotoUseCase: DeleteTenantProfilePhotoUseCase,
     private val fetchAndCacheProfilePhotoUseCase: FetchAndCacheProfilePhotoUseCase,
+    private val fetchAndCacheDocumentUseCase: FetchAndCacheDocumentUseCase,
     private val syncTenantDriveFolderUseCase: SyncTenantDriveFolderUseCase,
     private val googleAuthManager: GoogleFormsAuthManager,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
-    private val tenantId: Int? = savedStateHandle.get<String>("tenantId")?.toIntOrNull()
-        ?: savedStateHandle.get<Int>("tenantId")
+    private val tenantId: Int? = savedStateHandle.get<Any>("tenantId")?.let { raw ->
+        when (raw) {
+            is Int -> raw
+            is Number -> raw.toInt()
+            is String -> raw.toIntOrNull()
+            else -> null
+        }
+    }
 
     private val _uiState = MutableStateFlow<TenantDetailsUiState>(TenantDetailsUiState.Loading)
     val uiState: StateFlow<TenantDetailsUiState> = _uiState.asStateFlow()
@@ -215,6 +227,7 @@ class TenantDetailsViewModel @Inject constructor(
         viewModelScope.launch {
             val tenant = getTenantUseCase.execute(tenantId)
             if (tenant != null) {
+                val propEntity = repository.getProperty(tenant.propertyId)
                 // Ensure photo is fetched / cached from Drive if available and sync human-readable folder name
                 if (tenant.cloudId.isNotBlank()) {
                     launch { fetchAndCacheProfilePhotoUseCase(tenant.cloudId) }
@@ -223,8 +236,9 @@ class TenantDetailsViewModel @Inject constructor(
 
                 combine(
                     getTenantLedgerUseCase(tenantId),
-                    getTenantProfilePhotoUseCase(tenant.cloudId)
-                ) { payments, photo ->
+                    getTenantProfilePhotoUseCase(tenant.cloudId),
+                    tenantMediaRepository.getDocumentsFlow(tenant.cloudId)
+                ) { payments, photo, docs ->
                     val prev = _uiState.value
                     val currentProgress = if (prev is TenantDetailsUiState.Success) prev.uploadProgress else UploadPhotoProgress.Idle
                     val isUploading = if (prev is TenantDetailsUiState.Success) prev.isPhotoUploading else false
@@ -235,7 +249,9 @@ class TenantDetailsViewModel @Inject constructor(
                     TenantDetailsUiState.Success(
                         tenant = tenant,
                         payments = payments,
+                        property = propEntity,
                         profilePhoto = photo,
+                        documents = docs,
                         uploadProgress = currentProgress,
                         isPhotoUploading = isUploading,
                         isPhotoDownloading = isDownloading,
@@ -245,10 +261,30 @@ class TenantDetailsViewModel @Inject constructor(
                 }.collectLatest { state ->
                     _uiState.value = state
 
-                    // Check if tenant has remote photo on Google Drive but local file is not yet cached
+                    // Check if tenant has remote photo on Google Drive but local file is not yet cached or driveFileId changed
                     val photo = state.profilePhoto
-                    if (photo != null && photo.driveFileId.isNotBlank() && !photo.hasLocalFile) {
-                        downloadPhotoIfMissing(state.tenant.cloudId)
+                    if (photo != null && photo.driveFileId.isNotBlank()) {
+                        val fileValid = photo.localFilePath.isNotBlank() &&
+                                        java.io.File(photo.localFilePath).exists() &&
+                                        java.io.File(photo.localFilePath).length() > 0 &&
+                                        java.io.File(photo.localFilePath).name.contains(photo.driveFileId)
+                        if (!fileValid) {
+                            downloadPhotoIfMissing(state.tenant.cloudId)
+                        }
+                    }
+
+                    // Check if tenant has remote documents on Google Drive but local files are missing
+                    for (doc in state.documents) {
+                        if (doc.driveFileId.isNotBlank()) {
+                            val docValid = doc.localFilePath.isNotBlank() &&
+                                           java.io.File(doc.localFilePath).exists() &&
+                                           java.io.File(doc.localFilePath).length() > 0
+                            if (!docValid) {
+                                viewModelScope.launch {
+                                    fetchAndCacheDocumentUseCase(doc.cloudId)
+                                }
+                            }
+                        }
                     }
                 }
             } else {
@@ -384,6 +420,74 @@ class TenantDetailsViewModel @Inject constructor(
         }
     }
 
+    fun uploadDocument(uri: Uri, fileName: String, mimeType: String) {
+        val currentState = _uiState.value as? TenantDetailsUiState.Success ?: return
+        viewModelScope.launch {
+            _uiEffect.emit(TenantDetailsUiEffect.ShowToast("Uploading document..."))
+            val result = tenantMediaRepository.uploadDocument(
+                propertyId = currentState.tenant.propertyId,
+                tenantCloudId = currentState.tenant.cloudId,
+                documentUri = uri,
+                fileName = fileName,
+                mimeType = mimeType
+            )
+            when (result) {
+                is PgResult.Success -> {
+                    _uiEffect.emit(TenantDetailsUiEffect.ShowToast("Document uploaded successfully."))
+                }
+                is PgResult.Failure -> {
+                    _uiEffect.emit(TenantDetailsUiEffect.ShowToast("Upload failed: ${result.error.message}"))
+                }
+            }
+        }
+    }
+
+    fun deleteDocument(cloudId: String) {
+        viewModelScope.launch {
+            val result = tenantMediaRepository.deleteMedia(cloudId)
+            if (result is PgResult.Success) {
+                _uiEffect.emit(TenantDetailsUiEffect.ShowToast("Document removed."))
+            } else if (result is PgResult.Failure) {
+                _uiEffect.emit(TenantDetailsUiEffect.ShowToast("Failed to remove document: ${result.error.message}"))
+            }
+        }
+    }
+
+    fun syncAndAuthorizeDrive() {
+        val current = _uiState.value as? TenantDetailsUiState.Success ?: return
+        viewModelScope.launch {
+            val hasDrive = googleAuthManager.hasDriveScope()
+            if (!hasDrive) {
+                _uiEffect.emit(TenantDetailsUiEffect.LaunchGoogleConsent(googleAuthManager.getDriveConsentIntent()))
+                return@launch
+            }
+
+            _uiEffect.emit(TenantDetailsUiEffect.ShowToast("Syncing Drive photos and documents..."))
+            _uiState.value = current.copy(isPhotoDownloading = true, photoDownloadError = null)
+
+            if (current.tenant.cloudId.isNotBlank()) {
+                // 1. Scan Drive folders directly for profile photo and docs
+                syncTenantDriveFolderUseCase(current.tenant.cloudId)
+
+                // 2. Fetch and cache profile photo
+                fetchAndCacheProfilePhotoUseCase(current.tenant.cloudId)
+
+                // 3. Cache documents
+                for (doc in current.documents) {
+                    fetchAndCacheDocumentUseCase(doc.cloudId)
+                }
+            }
+
+            _uiState.value = (_uiState.value as? TenantDetailsUiState.Success)?.copy(
+                isPhotoDownloading = false,
+                photoDownloadError = null,
+                needsDriveConsent = false
+            ) ?: return@launch
+
+            _uiEffect.emit(TenantDetailsUiEffect.ShowToast("Drive sync complete! Profile photo updated."))
+        }
+    }
+
     fun handleGoogleConsentResult(data: Intent?) {
         viewModelScope.launch {
             val result = googleAuthManager.handleSignInResult(data)
@@ -394,11 +498,8 @@ class TenantDetailsViewModel @Inject constructor(
                         needsDriveConsent = false
                     ) ?: return@launch
 
-                    // Automatically download remote photo if waiting
-                    val current = _uiState.value as? TenantDetailsUiState.Success
-                    if (current != null && current.profilePhoto != null && !current.profilePhoto.hasLocalFile) {
-                        downloadPhotoIfMissing(current.tenant.cloudId)
-                    }
+                    _uiEffect.emit(TenantDetailsUiEffect.ShowToast("Google Drive authorized! Syncing..."))
+                    syncAndAuthorizeDrive()
 
                     // Automatically retry pending photo upload if exists
                     pendingPhotoUploadUri?.let { uri ->
@@ -486,6 +587,21 @@ data class AddTenantUiState(
     val bedId: String = "",
     val notes: String = "",
     val kycDocType: String = "Aadhaar Card",
+    val foodPreference: String = "Veg",
+    val expectedVacateDate: String = "",
+    val refundableDeposit: String = "",
+    val fatherName: String = "",
+    val fatherPhone: String = "",
+    val guardianName: String = "",
+    val guardianRelationship: String = "Parent",
+    val guardianPhone: String = "",
+    val localRefName: String = "",
+    val localRefPhone: String = "",
+    val occupationOther: String = "",
+    val officeName: String = "",
+    val officeAddress: String = "",
+    val officePhone: String = "",
+    val vehicleNumber: String = "",
     
     val rooms: List<RoomEntity> = emptyList(),
     val availableBeds: List<String> = emptyList(),
@@ -498,14 +614,65 @@ data class AddTenantUiState(
 @HiltViewModel
 class AddTenantViewModel @Inject constructor(
     private val addTenantUseCase: AddTenantUseCase,
-    private val repository: TenantRepository
+    private val repository: TenantRepository,
+    private val getPendingDetailsUseCase: GetPendingRegistrationDetailsUseCase,
+    private val acceptPendingTenantUseCase: AcceptPendingTenantUseCase,
+    savedStateHandle: SavedStateHandle
 ) : ViewModel() {
+
+    var currentRegistrationId: String = savedStateHandle.get<String>("registrationId") ?: ""
+        private set
 
     private val _uiState = MutableStateFlow(AddTenantUiState())
     val uiState: StateFlow<AddTenantUiState> = _uiState.asStateFlow()
 
     init {
         loadRooms()
+        if (currentRegistrationId.isNotBlank()) {
+            loadFromPendingRegistration(currentRegistrationId)
+        }
+    }
+
+    fun loadFromPendingRegistration(regId: String) {
+        if (regId.isBlank()) return
+        currentRegistrationId = regId
+        viewModelScope.launch {
+            val result = getPendingDetailsUseCase(regId)
+            if (result is PgResult.Success && result.data != null) {
+                val reg = result.data
+                _uiState.update {
+                    it.copy(
+                        name = reg.fullName,
+                        phone = reg.phone,
+                        email = reg.email,
+                        dob = reg.dob,
+                        gender = reg.gender.ifBlank { "Male" },
+                        address = reg.currentAddress.ifBlank { reg.permanentAddress },
+                        occupation = reg.occupation,
+                        occupationOther = reg.occupationOther,
+                        companyOrCollege = reg.organization.ifBlank { reg.officeName },
+                        officeName = reg.officeName.ifBlank { reg.organization },
+                        officeAddress = reg.officeAddress,
+                        officePhone = reg.officePhone,
+                        notes = reg.notes,
+                        foodPreference = reg.foodPreference.ifBlank { "Veg" },
+                        moveInDate = reg.expectedJoiningDate.ifBlank { it.moveInDate },
+                        expectedVacateDate = reg.expectedVacateDate,
+                        refundableDeposit = reg.refundableDeposit,
+                        fatherName = reg.fatherName,
+                        fatherPhone = reg.fatherPhone,
+                        guardianName = reg.guardianName,
+                        guardianRelationship = reg.guardianRelationship.ifBlank { "Parent" },
+                        guardianPhone = reg.guardianPhone,
+                        emergencyContact = reg.emergencyPhone.ifBlank { reg.guardianPhone.ifBlank { reg.fatherPhone.ifBlank { reg.localRefPhone } } },
+                        alternateContact = reg.fatherPhone.ifBlank { reg.localRefPhone },
+                        localRefName = reg.localRefName,
+                        localRefPhone = reg.localRefPhone,
+                        vehicleNumber = reg.vehicleNumber
+                    )
+                }
+            }
+        }
     }
 
     private fun loadRooms() {
@@ -517,9 +684,9 @@ class AddTenantViewModel @Inject constructor(
             } else if (roomsList.isEmpty() && _uiState.value.roomNumber.isBlank()) {
                 _uiState.update {
                     it.copy(
-                        roomNumber = "101",
-                        availableBeds = listOf("Bed A", "Bed B", "Bed C"),
-                        bedId = "Bed A"
+                        roomNumber = "",
+                        availableBeds = emptyList(),
+                        bedId = ""
                     )
                 }
             }
@@ -543,6 +710,21 @@ class AddTenantViewModel @Inject constructor(
     fun onLeavingDateChanged(value: String) = _uiState.update { it.copy(leavingDate = value) }
     fun onNotesChanged(value: String) = _uiState.update { it.copy(notes = value) }
     fun onKycDocTypeChanged(value: String) = _uiState.update { it.copy(kycDocType = value) }
+    fun onFoodPreferenceChanged(value: String) = _uiState.update { it.copy(foodPreference = value) }
+    fun onExpectedVacateDateChanged(value: String) = _uiState.update { it.copy(expectedVacateDate = value) }
+    fun onRefundableDepositChanged(value: String) = _uiState.update { it.copy(refundableDeposit = value) }
+    fun onFatherNameChanged(value: String) = _uiState.update { it.copy(fatherName = value) }
+    fun onFatherPhoneChanged(value: String) = _uiState.update { it.copy(fatherPhone = value) }
+    fun onGuardianNameChanged(value: String) = _uiState.update { it.copy(guardianName = value) }
+    fun onGuardianRelationshipChanged(value: String) = _uiState.update { it.copy(guardianRelationship = value) }
+    fun onGuardianPhoneChanged(value: String) = _uiState.update { it.copy(guardianPhone = value) }
+    fun onLocalRefNameChanged(value: String) = _uiState.update { it.copy(localRefName = value) }
+    fun onLocalRefPhoneChanged(value: String) = _uiState.update { it.copy(localRefPhone = value) }
+    fun onOccupationOtherChanged(value: String) = _uiState.update { it.copy(occupationOther = value) }
+    fun onOfficeNameChanged(value: String) = _uiState.update { it.copy(officeName = value) }
+    fun onOfficeAddressChanged(value: String) = _uiState.update { it.copy(officeAddress = value) }
+    fun onOfficePhoneChanged(value: String) = _uiState.update { it.copy(officePhone = value) }
+    fun onVehicleNumberChanged(value: String) = _uiState.update { it.copy(vehicleNumber = value) }
 
     fun onRoomChanged(roomNo: String) {
         val trimmedRoom = roomNo.trim()
@@ -550,30 +732,37 @@ class AddTenantViewModel @Inject constructor(
             val room = uiState.value.rooms.find { it.roomNumber.equals(trimmedRoom, ignoreCase = true) }
                 ?: repository.getRoom(trimmedRoom)
             if (room != null) {
+                val physicalBeds = repository.getBedsForRoom(room.roomNumber).filter { !it.deleted }
                 val activeTenants = repository.getTenantsInRoom(room.roomNumber).filter { !it.deleted && it.roomNumber.isNotBlank() }
-                val occupiedBeds = activeTenants.map { it.bedId.trim().lowercase() }
+                val occupiedBeds = activeTenants.map { it.bedId.trim().lowercase() }.toSet()
                 
-                // Generate beds Bed A, Bed B, etc.
-                val beds = (1..maxOf(room.capacity, 1)).map { "Bed ${(64 + it).toChar()}" }
-                val available = beds.filter { !occupiedBeds.contains(it.trim().lowercase()) }
-                val finalAvailable = if (available.isNotEmpty()) available else listOf("Bed A", "Bed B")
+                val beds = if (physicalBeds.isNotEmpty()) {
+                    physicalBeds.filter { it.status != "BLOCKED" }.map { it.bedId }
+                } else {
+                    val convention = com.example.core.util.BedIdentityUtil.determineConvention(activeTenants.map { it.bedId })
+                    (1..maxOf(room.capacity, 1)).map {
+                        com.example.core.util.BedIdentityUtil.formatBedId(it, convention)
+                    }
+                }
+                val available = beds.filter { bedCandidate ->
+                    activeTenants.none { tenant -> com.example.core.util.BedIdentityUtil.matchesSameBed(tenant.bedId, bedCandidate) }
+                }
                 
                 _uiState.update { 
                     it.copy(
                         roomNumber = room.roomNumber,
-                        bedId = if (available.isNotEmpty()) available.first() else "Bed A",
-                        availableBeds = finalAvailable,
+                        bedId = if (available.isNotEmpty()) available.first() else "",
+                        availableBeds = available,
                         monthlyRent = if (it.monthlyRent.isBlank() && room.ratePerBed > 0) room.ratePerBed.toString() else it.monthlyRent,
                         securityDeposit = if (it.securityDeposit.isBlank() && room.ratePerBed > 0) room.ratePerBed.toString() else it.securityDeposit
                     )
                 }
             } else {
-                val defaultBeds = listOf("Bed A", "Bed B", "Bed C")
                 _uiState.update { 
                     it.copy(
                         roomNumber = trimmedRoom,
-                        availableBeds = defaultBeds,
-                        bedId = if (it.bedId.isBlank()) "Bed A" else it.bedId
+                        availableBeds = emptyList(),
+                        bedId = ""
                     )
                 }
             }
@@ -588,6 +777,10 @@ class AddTenantViewModel @Inject constructor(
         val state = uiState.value
         _uiState.update { it.copy(isLoading = true, error = null) }
         viewModelScope.launch {
+            val stableTargetId = if (currentRegistrationId.isNotBlank()) {
+                "tenant_${currentRegistrationId.removePrefix("reg_")}"
+            } else ""
+
             val result = addTenantUseCase.execute(
                 name = state.name,
                 phone = state.phone,
@@ -607,11 +800,29 @@ class AddTenantViewModel @Inject constructor(
                 occupation = state.occupation,
                 companyOrCollege = state.companyOrCollege,
                 leavingDate = state.leavingDate,
-                notes = state.notes
+                notes = state.notes,
+                targetCloudId = stableTargetId
             )
             
             when (result) {
                 is TenantValidationResult.Success -> {
+                    if (currentRegistrationId.isNotBlank()) {
+                        try {
+                            acceptPendingTenantUseCase(
+                                cloudId = currentRegistrationId,
+                                roomNumber = state.roomNumber,
+                                bedId = state.bedId,
+                                monthlyRent = state.monthlyRent.toDoubleOrNull() ?: 0.0,
+                                securityDeposit = state.securityDeposit.toDoubleOrNull() ?: 0.0,
+                                moveInDate = state.moveInDate,
+                                gender = state.gender,
+                                kycDocType = state.kycDocType,
+                                notes = state.notes
+                            )
+                        } catch (e: Exception) {
+                            android.util.Log.e("AddTenantViewModel", "Error marking registration accepted", e)
+                        }
+                    }
                     _uiState.update { it.copy(isLoading = false, isSuccess = true) }
                 }
                 is TenantValidationResult.Error -> {
@@ -620,6 +831,7 @@ class AddTenantViewModel @Inject constructor(
             }
         }
     }
+
 }
 
 // ==================================================
@@ -647,6 +859,21 @@ data class EditTenantUiState(
     val bedId: String = "",
     val notes: String = "",
     val kycDocType: String = "Aadhaar Card",
+    val foodPreference: String = "Veg",
+    val expectedVacateDate: String = "",
+    val refundableDeposit: String = "",
+    val fatherName: String = "",
+    val fatherPhone: String = "",
+    val guardianName: String = "",
+    val guardianRelationship: String = "Parent",
+    val guardianPhone: String = "",
+    val localRefName: String = "",
+    val localRefPhone: String = "",
+    val occupationOther: String = "",
+    val officeName: String = "",
+    val officeAddress: String = "",
+    val officePhone: String = "",
+    val vehicleNumber: String = "",
     
     val rooms: List<RoomEntity> = emptyList(),
     val availableBeds: List<String> = emptyList(),
@@ -665,8 +892,14 @@ class EditTenantViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
-    private val tenantId: Int? = savedStateHandle.get<String>("tenantId")?.toIntOrNull()
-        ?: savedStateHandle.get<Int>("tenantId")
+    private val tenantId: Int? = savedStateHandle.get<Any>("tenantId")?.let { raw ->
+        when (raw) {
+            is Int -> raw
+            is Number -> raw.toInt()
+            is String -> raw.toIntOrNull()
+            else -> null
+        }
+    }
 
     private val _uiState = MutableStateFlow(EditTenantUiState())
     val uiState: StateFlow<EditTenantUiState> = _uiState.asStateFlow()
@@ -689,10 +922,20 @@ class EditTenantViewModel @Inject constructor(
                 // Populate available beds including current bed
                 val room = roomsList.find { it.roomNumber == tenant.roomNumber }
                 val beds = if (room != null) {
+                    val physicalBeds = repository.getBedsForRoom(room.roomNumber).filter { !it.deleted }
                     val activeTenants = repository.getTenantsInRoom(tenant.roomNumber).filter { it.id != tenant.id }
-                    val occupiedBeds = activeTenants.map { it.bedId.lowercase() }
-                    val allBeds = (1..room.capacity).map { "Bed ${(64 + it).toChar()}" }
-                    allBeds.filter { !occupiedBeds.contains(it.lowercase()) || it.equals(tenant.bedId, ignoreCase = true) }
+                    val allBeds = if (physicalBeds.isNotEmpty()) {
+                        physicalBeds.filter { it.status != "BLOCKED" || com.example.core.util.BedIdentityUtil.matchesSameBed(it.bedId, tenant.bedId) }.map { it.bedId }
+                    } else {
+                        val convention = com.example.core.util.BedIdentityUtil.determineConvention(activeTenants.map { it.bedId } + listOf(tenant.bedId))
+                        (1..maxOf(room.capacity, 1)).map {
+                            com.example.core.util.BedIdentityUtil.formatBedId(it, convention)
+                        }
+                    }
+                    allBeds.filter { bedCandidate ->
+                        com.example.core.util.BedIdentityUtil.matchesSameBed(bedCandidate, tenant.bedId) ||
+                        activeTenants.none { other -> com.example.core.util.BedIdentityUtil.matchesSameBed(other.bedId, bedCandidate) }
+                    }
                 } else {
                     listOf(tenant.bedId).filter { it.isNotBlank() }
                 }
@@ -706,7 +949,7 @@ class EditTenantViewModel @Inject constructor(
                         emergencyContact = tenant.emergencyContact,
                         email = tenant.email,
                         dob = tenant.dob,
-                        gender = tenant.gender,
+                        gender = tenant.gender.ifBlank { "Male" },
                         address = tenant.address,
                         occupation = tenant.occupation,
                         companyOrCollege = tenant.companyOrCollege,
@@ -719,6 +962,8 @@ class EditTenantViewModel @Inject constructor(
                         bedId = tenant.bedId,
                         notes = tenant.notes,
                         kycDocType = if (tenant.kycDocType.isBlank()) "None" else tenant.kycDocType,
+                        refundableDeposit = tenant.securityDeposit.toString(),
+                        officeName = tenant.companyOrCollege,
                         rooms = roomsList,
                         availableBeds = beds,
                         isLoading = false
@@ -747,27 +992,55 @@ class EditTenantViewModel @Inject constructor(
     fun onLeavingDateChanged(value: String) = _uiState.update { it.copy(leavingDate = value) }
     fun onNotesChanged(value: String) = _uiState.update { it.copy(notes = value) }
     fun onKycDocTypeChanged(value: String) = _uiState.update { it.copy(kycDocType = value) }
+    fun onFoodPreferenceChanged(value: String) = _uiState.update { it.copy(foodPreference = value) }
+    fun onExpectedVacateDateChanged(value: String) = _uiState.update { it.copy(expectedVacateDate = value) }
+    fun onRefundableDepositChanged(value: String) = _uiState.update { it.copy(refundableDeposit = value) }
+    fun onFatherNameChanged(value: String) = _uiState.update { it.copy(fatherName = value) }
+    fun onFatherPhoneChanged(value: String) = _uiState.update { it.copy(fatherPhone = value) }
+    fun onGuardianNameChanged(value: String) = _uiState.update { it.copy(guardianName = value) }
+    fun onGuardianRelationshipChanged(value: String) = _uiState.update { it.copy(guardianRelationship = value) }
+    fun onGuardianPhoneChanged(value: String) = _uiState.update { it.copy(guardianPhone = value) }
+    fun onLocalRefNameChanged(value: String) = _uiState.update { it.copy(localRefName = value) }
+    fun onLocalRefPhoneChanged(value: String) = _uiState.update { it.copy(localRefPhone = value) }
+    fun onOccupationOtherChanged(value: String) = _uiState.update { it.copy(occupationOther = value) }
+    fun onOfficeNameChanged(value: String) = _uiState.update { it.copy(officeName = value) }
+    fun onOfficeAddressChanged(value: String) = _uiState.update { it.copy(officeAddress = value) }
+    fun onOfficePhoneChanged(value: String) = _uiState.update { it.copy(officePhone = value) }
+    fun onVehicleNumberChanged(value: String) = _uiState.update { it.copy(vehicleNumber = value) }
 
     fun onRoomChanged(roomNo: String) {
+        val trimmedRoom = roomNo.trim()
         viewModelScope.launch {
-            val room = uiState.value.rooms.find { it.roomNumber == roomNo }
+            val room = uiState.value.rooms.find { it.roomNumber.equals(trimmedRoom, ignoreCase = true) }
+                ?: repository.getRoom(trimmedRoom)
             if (room != null) {
-                val activeTenants = repository.getTenantsInRoom(roomNo).filter { it.id != uiState.value.id }
-                val occupiedBeds = activeTenants.map { it.bedId.lowercase() }
+                val physicalBeds = repository.getBedsForRoom(room.roomNumber).filter { !it.deleted }
+                val activeTenants = repository.getTenantsInRoom(room.roomNumber).filter { it.id != uiState.value.id && !it.deleted }
+                val occupiedBeds = activeTenants.map { it.bedId.lowercase() }.toSet()
                 
-                val beds = (1..room.capacity).map { "Bed ${(64 + it).toChar()}" }
-                val available = beds.filter { !occupiedBeds.contains(it.lowercase()) }
+                val beds = if (physicalBeds.isNotEmpty()) {
+                    physicalBeds.filter { it.status != "BLOCKED" || com.example.core.util.BedIdentityUtil.matchesSameBed(it.bedId, uiState.value.bedId) }.map { it.bedId }
+                } else {
+                    val convention = com.example.core.util.BedIdentityUtil.determineConvention(activeTenants.map { it.bedId } + listOf(uiState.value.bedId))
+                    (1..maxOf(room.capacity, 1)).map {
+                        com.example.core.util.BedIdentityUtil.formatBedId(it, convention)
+                    }
+                }
+                val available = beds.filter { bedCandidate ->
+                    com.example.core.util.BedIdentityUtil.matchesSameBed(bedCandidate, uiState.value.bedId) ||
+                    activeTenants.none { other -> com.example.core.util.BedIdentityUtil.matchesSameBed(other.bedId, bedCandidate) }
+                }
                 
                 _uiState.update { 
                     it.copy(
-                        roomNumber = roomNo,
-                        bedId = if (available.isNotEmpty()) available.first() else "",
+                        roomNumber = room.roomNumber,
+                        bedId = if (available.isNotEmpty() && !available.contains(it.bedId)) available.first() else it.bedId,
                         availableBeds = available,
-                        monthlyRent = room.ratePerBed.toString()
+                        monthlyRent = if (room.ratePerBed > 0) room.ratePerBed.toString() else it.monthlyRent
                     )
                 }
             } else {
-                _uiState.update { it.copy(roomNumber = roomNo, availableBeds = emptyList(), bedId = "") }
+                _uiState.update { it.copy(roomNumber = trimmedRoom, availableBeds = emptyList(), bedId = "") }
             }
         }
     }

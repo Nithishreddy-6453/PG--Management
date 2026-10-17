@@ -87,6 +87,7 @@ import java.util.Locale
 fun PendingRegistrationDetailScreen(
     viewModel: PendingRegistrationDetailViewModel,
     onBackClick: () -> Unit,
+    onNavigateToAddTenant: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -408,40 +409,34 @@ fun PendingRegistrationDetailScreen(
                             DetailRow(label = "Full Name", value = reg.fullName)
                             DetailRow(label = "Mobile Number", value = reg.phone)
                             DetailRow(label = "Email Address", value = reg.email.ifBlank { "Not provided" })
+                            DetailRow(label = "Date of Birth", value = reg.dob.ifBlank { "Not provided" })
+                            DetailRow(label = "Gender", value = reg.gender)
+                            DetailRow(label = "Food Preference", value = reg.foodPreference)
                         }
                     }
 
-                    // 4. Emergency Contact Card
+                    // 4. Family & Guardian Details Card
                     SectionDetailCard(
-                        title = emergencyContactText,
+                        title = rememberTranslation("Family & Guardian Details"),
                         icon = Icons.Default.ContactPhone
                     ) {
-                        if (uiState.isEditMode) {
-                            OutlinedTextField(
-                                value = uiState.emergencyName,
-                                onValueChange = { viewModel.onEmergencyNameChanged(it) },
-                                label = { Text("Emergency Contact Name *") },
-                                modifier = Modifier.fillMaxWidth().testTag("edit_emergency_name")
-                            )
-                            Spacer(modifier = Modifier.height(10.dp))
-                            OutlinedTextField(
-                                value = uiState.emergencyPhone,
-                                onValueChange = { viewModel.onEmergencyPhoneChanged(it) },
-                                label = { Text("Emergency Contact Mobile *") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                                modifier = Modifier.fillMaxWidth().testTag("edit_emergency_phone")
-                            )
-                            Spacer(modifier = Modifier.height(10.dp))
-                            OutlinedTextField(
-                                value = uiState.emergencyRelation,
-                                onValueChange = { viewModel.onEmergencyRelationChanged(it) },
-                                label = { Text("Relationship *") },
-                                modifier = Modifier.fillMaxWidth().testTag("edit_emergency_relation")
-                            )
-                        } else {
-                            DetailRow(label = "Emergency Contact Name", value = reg.emergencyName)
-                            DetailRow(label = "Emergency Mobile", value = reg.emergencyPhone)
-                            DetailRow(label = "Relationship", value = reg.emergencyRelation)
+                        if (reg.fatherName.isNotBlank() || reg.fatherPhone.isNotBlank()) {
+                            DetailRow(label = "Father's Name", value = reg.fatherName.ifBlank { "Not provided" })
+                            DetailRow(label = "Father's Phone", value = reg.fatherPhone.ifBlank { "Not provided" })
+                        }
+                        if (reg.guardianName.isNotBlank() || reg.guardianPhone.isNotBlank()) {
+                            DetailRow(label = "Guardian Name", value = reg.guardianName)
+                            DetailRow(label = "Guardian Relationship", value = reg.guardianRelationship)
+                            DetailRow(label = "Guardian Phone", value = reg.guardianPhone)
+                        }
+                        if (reg.localRefName.isNotBlank() || reg.localRefPhone.isNotBlank()) {
+                            DetailRow(label = "Local Reference Name", value = reg.localRefName)
+                            DetailRow(label = "Local Reference Phone", value = reg.localRefPhone)
+                        }
+                        if (reg.fatherName.isBlank() && reg.guardianName.isBlank() && reg.localRefName.isBlank()) {
+                            DetailRow(label = "Emergency Contact", value = reg.emergencyName.ifBlank { "None" })
+                            DetailRow(label = "Emergency Mobile", value = reg.emergencyPhone.ifBlank { "None" })
+                            DetailRow(label = "Relationship", value = reg.emergencyRelation.ifBlank { "Parent" })
                         }
                     }
 
@@ -467,7 +462,7 @@ fun PendingRegistrationDetailScreen(
                                 modifier = Modifier.fillMaxWidth().testTag("edit_current_address")
                             )
                         } else {
-                            DetailRow(label = "Permanent Address", value = reg.permanentAddress)
+                            DetailRow(label = "Permanent Address", value = reg.permanentAddress.ifBlank { "Not provided" })
                             DetailRow(label = "Current / Local Address", value = reg.currentAddress.ifBlank { "Same as permanent" })
                         }
                     }
@@ -499,8 +494,17 @@ fun PendingRegistrationDetailScreen(
                                 modifier = Modifier.fillMaxWidth().testTag("edit_joining_date")
                             )
                         } else {
-                            DetailRow(label = "Occupation", value = reg.occupation.ifBlank { "Not provided" })
-                            DetailRow(label = "Company / College", value = reg.organization.ifBlank { "Not provided" })
+                            DetailRow(label = "Occupation", value = if (reg.occupationOther.isNotBlank()) "${reg.occupation} (${reg.occupationOther})" else reg.occupation.ifBlank { "Not provided" })
+                            DetailRow(label = "Company / College", value = reg.organization.ifBlank { reg.officeName }.ifBlank { "Not provided" })
+                            if (reg.officeAddress.isNotBlank()) {
+                                DetailRow(label = "Office / College Address", value = reg.officeAddress)
+                            }
+                            if (reg.officePhone.isNotBlank()) {
+                                DetailRow(label = "Office / College Phone", value = reg.officePhone)
+                            }
+                            if (reg.vehicleNumber.isNotBlank()) {
+                                DetailRow(label = "Vehicle Registration No", value = reg.vehicleNumber)
+                            }
                             DetailRow(label = "Expected Joining Date", value = reg.expectedJoiningDate.ifBlank { "Immediate" })
                         }
                     }
@@ -522,6 +526,7 @@ fun PendingRegistrationDetailScreen(
                             DetailRow(label = "Notes & Preferences", value = reg.notes.ifBlank { "None" })
                         }
                     }
+
 
                     // 8. Action Buttons (Accept / Reject / Save Edits)
                     if (reg.isPending) {
@@ -570,7 +575,14 @@ fun PendingRegistrationDetailScreen(
                                 }
 
                                 Button(
-                                    onClick = { viewModel.openAssignDialog() },
+                                    onClick = {
+                                        val cloudId = uiState.registration?.cloudId ?: ""
+                                        if (onNavigateToAddTenant != null && cloudId.isNotBlank()) {
+                                            onNavigateToAddTenant(cloudId)
+                                        } else {
+                                            viewModel.openAssignDialog()
+                                        }
+                                    },
                                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                                     shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier

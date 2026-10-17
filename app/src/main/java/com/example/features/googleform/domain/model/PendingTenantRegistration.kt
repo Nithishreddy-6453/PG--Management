@@ -10,7 +10,7 @@ enum class PendingRegistrationStatus(val dbValue: String) {
 
     companion object {
         fun fromString(value: String): PendingRegistrationStatus {
-            return entries.find { it.dbValue.equals(value, ignoreCase = true) } ?: PENDING
+            return entries.find { it.dbValue.equals(value, ignoreCase = true) } ?: NEEDS_REVIEW
         }
     }
 }
@@ -26,6 +26,8 @@ data class PendingTenantRegistration(
     val fullName: String,
     val phone: String,
     val email: String,
+    val dob: String = "",
+    val gender: String = "Male",
     val emergencyName: String,
     val emergencyPhone: String,
     val emergencyRelation: String,
@@ -35,6 +37,21 @@ data class PendingTenantRegistration(
     val organization: String,
     val expectedJoiningDate: String,
     val notes: String,
+    val foodPreference: String = "Veg",
+    val expectedVacateDate: String = "",
+    val refundableDeposit: String = "",
+    val fatherName: String = "",
+    val fatherPhone: String = "",
+    val guardianName: String = "",
+    val guardianRelationship: String = "Parent",
+    val guardianPhone: String = "",
+    val localRefName: String = "",
+    val localRefPhone: String = "",
+    val occupationOther: String = "",
+    val officeName: String = "",
+    val officeAddress: String = "",
+    val officePhone: String = "",
+    val vehicleNumber: String = "",
     val status: PendingRegistrationStatus,
     val createdTenantCloudId: String,
     val reviewedAt: Long,

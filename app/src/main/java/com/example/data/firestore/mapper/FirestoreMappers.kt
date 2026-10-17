@@ -126,9 +126,9 @@ fun TenantEntity.toDto(ownerId: String, deviceId: String = ""): TenantDto {
     val docId = when {
         cloudId.isNotBlank() -> cloudId
         id > 0 -> "tenant_$id"
-        else -> "tenant_${System.currentTimeMillis()}"
+        else -> "tenant_${java.util.UUID.randomUUID()}"
     }
-    val propId = if (propertyId.isNotBlank() && propertyId != "property_default") propertyId else ""
+    val propId = propertyId
     return TenantDto(
         id = docId,
         cloudId = docId,
@@ -170,9 +170,9 @@ fun TenantDto.toEntity(): TenantEntity {
         cloudId.isNotBlank() -> cloudId
         id.isNotBlank() -> id
         localId > 0 -> "tenant_$localId"
-        else -> ""
+        else -> "tenant_${java.util.UUID.randomUUID()}"
     }
-    val propId = if (propertyId.isNotBlank() && propertyId != "property_default") propertyId else ""
+    val propId = propertyId
     return TenantEntity(
         id = localId,
         cloudId = cId,
@@ -211,11 +211,11 @@ fun TenantDto.toEntity(): TenantEntity {
 // ==========================================
 // RENT PAYMENT MAPPERS
 // ==========================================
-fun RentPaymentEntity.toDto(ownerId: String, deviceId: String = ""): PaymentDto {
+fun RentPaymentEntity.toDto(ownerId: String, deviceId: String = "", tenantCloudId: String = ""): PaymentDto {
     val docId = when {
         cloudId.isNotBlank() -> cloudId
         id > 0 -> "payment_$id"
-        else -> "payment_${System.currentTimeMillis()}"
+        else -> "payment_${java.util.UUID.randomUUID()}"
     }
     val propId = if (propertyId.isNotBlank()) propertyId else "property_default"
     return PaymentDto(
@@ -225,6 +225,7 @@ fun RentPaymentEntity.toDto(ownerId: String, deviceId: String = ""): PaymentDto 
         propertyId = propId,
         localId = id,
         tenantId = tenantId,
+        tenantCloudId = tenantCloudId,
         tenantName = tenantName,
         roomNumber = roomNumber,
         billingMonth = billingMonth,
@@ -251,7 +252,7 @@ fun PaymentDto.toEntity(): RentPaymentEntity {
         cloudId.isNotBlank() -> cloudId
         id.isNotBlank() -> id
         localId > 0 -> "payment_$localId"
-        else -> ""
+        else -> "payment_${java.util.UUID.randomUUID()}"
     }
     val propId = if (propertyId.isNotBlank()) propertyId else "property_default"
     return RentPaymentEntity(
@@ -288,7 +289,7 @@ fun ExpenseEntity.toDto(ownerId: String, deviceId: String = ""): ExpenseDto {
     val docId = when {
         cloudId.isNotBlank() -> cloudId
         id > 0 -> "expense_$id"
-        else -> "expense_${System.currentTimeMillis()}"
+        else -> "expense_${java.util.UUID.randomUUID()}"
     }
     val propId = if (propertyId.isNotBlank()) propertyId else "property_default"
     return ExpenseDto(
@@ -319,7 +320,7 @@ fun ExpenseDto.toEntity(): ExpenseEntity {
         cloudId.isNotBlank() -> cloudId
         id.isNotBlank() -> id
         localId > 0 -> "expense_$localId"
-        else -> ""
+        else -> "expense_${java.util.UUID.randomUUID()}"
     }
     val propId = if (propertyId.isNotBlank()) propertyId else "property_default"
     return ExpenseEntity(
@@ -417,6 +418,7 @@ fun com.example.data.database.TenantMediaEntity.toDto(): com.example.data.firest
         propertyId = propertyId,
         tenantCloudId = tenantCloudId,
         driveFileId = driveFileId,
+        fileUrl = fileUrl,
         driveTenantFolderId = driveTenantFolderId,
         drivePhotosFolderId = drivePhotosFolderId,
         fileName = fileName,
@@ -424,6 +426,7 @@ fun com.example.data.database.TenantMediaEntity.toDto(): com.example.data.firest
         sizeBytes = sizeBytes,
         mediaType = mediaType,
         status = status,
+        verificationStatus = verificationStatus,
         driveFolderId = driveFolderId.ifBlank { drivePhotosFolderId },
         createdAt = createdAt,
         updatedAt = updatedAt,
@@ -439,6 +442,7 @@ fun com.example.data.firestore.model.TenantMediaDto.toEntity(localFilePath: Stri
         propertyId = propertyId,
         tenantCloudId = tenantCloudId,
         driveFileId = driveFileId,
+        fileUrl = fileUrl,
         driveTenantFolderId = driveTenantFolderId,
         drivePhotosFolderId = drivePhotosFolderId.ifBlank { driveFolderId },
         fileName = fileName,
@@ -446,6 +450,7 @@ fun com.example.data.firestore.model.TenantMediaDto.toEntity(localFilePath: Stri
         sizeBytes = sizeBytes,
         mediaType = mediaType,
         status = status,
+        verificationStatus = verificationStatus,
         localFilePath = localFilePath,
         driveFolderId = driveFolderId.ifBlank { drivePhotosFolderId },
         createdAt = createdAt,

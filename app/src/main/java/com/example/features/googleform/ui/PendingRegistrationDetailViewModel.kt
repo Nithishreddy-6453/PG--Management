@@ -217,18 +217,27 @@ class PendingRegistrationDetailViewModel @Inject constructor(
             val room = _uiState.value.rooms.find { it.roomNumber.equals(trimmed, ignoreCase = true) }
                 ?: tenantRepository.getRoom(trimmed)
             if (room != null) {
+                val physicalBeds = tenantRepository.getBedsForRoom(room.roomNumber).filter { !it.deleted }
                 val activeTenants = tenantRepository.getTenantsInRoom(room.roomNumber).filter { !it.deleted && it.roomNumber.isNotBlank() }
-                val occupiedBeds = activeTenants.map { it.bedId.trim().lowercase() }
+                val occupiedBeds = activeTenants.map { it.bedId.trim().lowercase() }.toSet()
                 
-                val beds = (1..maxOf(room.capacity, 1)).map { "Bed ${(64 + it).toChar()}" }
-                val available = beds.filter { !occupiedBeds.contains(it.trim().lowercase()) }
-                val finalAvailable = if (available.isNotEmpty()) available else listOf("Bed A", "Bed B")
+                val beds = if (physicalBeds.isNotEmpty()) {
+                    physicalBeds.filter { it.status != "BLOCKED" }.map { it.bedId }
+                } else {
+                    val convention = com.example.core.util.BedIdentityUtil.determineConvention(activeTenants.map { it.bedId })
+                    (1..maxOf(room.capacity, 1)).map {
+                        com.example.core.util.BedIdentityUtil.formatBedId(it, convention)
+                    }
+                }
+                val available = beds.filter { bedCandidate ->
+                    activeTenants.none { tenant -> com.example.core.util.BedIdentityUtil.matchesSameBed(tenant.bedId, bedCandidate) }
+                }
 
                 _uiState.update {
                     it.copy(
                         selectedRoomNumber = room.roomNumber,
-                        selectedBedId = if (available.isNotEmpty()) available.first() else "Bed A",
-                        availableBeds = finalAvailable,
+                        selectedBedId = if (available.isNotEmpty()) available.first() else "",
+                        availableBeds = available,
                         monthlyRent = if (it.monthlyRent.isBlank() && room.ratePerBed > 0) room.ratePerBed.toString() else it.monthlyRent,
                         securityDeposit = if (it.securityDeposit.isBlank() && room.ratePerBed > 0) room.ratePerBed.toString() else it.securityDeposit
                     )
@@ -237,8 +246,8 @@ class PendingRegistrationDetailViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         selectedRoomNumber = trimmed,
-                        availableBeds = listOf("Bed A", "Bed B", "Bed C"),
-                        selectedBedId = if (it.selectedBedId.isBlank()) "Bed A" else it.selectedBedId
+                        availableBeds = emptyList(),
+                        selectedBedId = ""
                     )
                 }
             }

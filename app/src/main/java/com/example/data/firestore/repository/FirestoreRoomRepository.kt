@@ -26,12 +26,36 @@ class FirestoreRoomRepository @Inject constructor(
     suspend fun saveRoom(roomDto: RoomDto): PgResult<Unit> {
         return try {
             val docId = if (roomDto.id.isNotBlank()) roomDto.id else roomDto.roomNumber
+            val now = if (roomDto.updatedAt > 0) roomDto.updatedAt else System.currentTimeMillis()
             val dtoToSave = roomDto.copy(
                 id = docId,
                 ownerId = if (roomDto.ownerId.isNotBlank()) roomDto.ownerId else currentOwnerId,
-                updatedAt = System.currentTimeMillis()
+                updatedAt = now
             )
-            collection.document(docId).set(dtoToSave).await()
+            val docRef = collection.document(docId)
+            firestore.runTransaction { transaction ->
+                val snapshot = transaction.get(docRef)
+                if (snapshot.exists()) {
+                    val remoteVersion = snapshot.getLong("version")?.toInt() ?: 1
+                    val remoteUpdatedAt = snapshot.getLong("updatedAt") ?: 0L
+                    val remoteDeleted = snapshot.getBoolean("deleted") ?: false
+                    val remoteDeviceId = snapshot.getString("lastModifiedByDeviceId") ?: ""
+
+                    // Idempotency: Reject stale write that would resurrect a deleted record
+                    if (remoteDeleted && !dtoToSave.deleted) {
+                        return@runTransaction
+                    }
+                    // Idempotency: Reject stale write if remote document is strictly newer
+                    if (remoteVersion > dtoToSave.version) {
+                        return@runTransaction
+                    }
+                    // Idempotency: Reject stale write if remote has equal version but newer timestamp from another device
+                    if (remoteVersion == dtoToSave.version && remoteUpdatedAt > dtoToSave.updatedAt && remoteDeviceId.isNotBlank() && remoteDeviceId != dtoToSave.lastModifiedByDeviceId) {
+                        return@runTransaction
+                    }
+                }
+                transaction.set(docRef, dtoToSave)
+            }.await()
             PgResult.Success(Unit)
         } catch (e: FirebaseFirestoreException) {
             PgResult.Failure(mapFirestoreException(e))
@@ -94,17 +118,29 @@ class FirestoreRoomRepository @Inject constructor(
 
     suspend fun deleteRoom(id: String, deviceId: String = ""): PgResult<Unit> {
         return try {
-            val updates = mutableMapOf<String, Any>(
-                "deleted" to true,
-                "updatedAt" to System.currentTimeMillis()
-            )
-            if (deviceId.isNotBlank()) {
-                updates["lastModifiedByDeviceId"] = deviceId
-            }
-            collection.document(id).update(updates).await()
+            val docRef = collection.document(id)
+            firestore.runTransaction { transaction ->
+                val snapshot = transaction.get(docRef)
+                if (snapshot.exists()) {
+                    val currentVersion = snapshot.getLong("version")?.toInt() ?: 1
+                    val updates = mutableMapOf<String, Any>(
+                        "deleted" to true,
+                        "version" to currentVersion + 1,
+                        "updatedAt" to System.currentTimeMillis()
+                    )
+                    if (deviceId.isNotBlank()) {
+                        updates["lastModifiedByDeviceId"] = deviceId
+                    }
+                    transaction.update(docRef, updates)
+                }
+            }.await()
             PgResult.Success(Unit)
         } catch (e: FirebaseFirestoreException) {
-            PgResult.Failure(mapFirestoreException(e))
+            if (e.code == FirebaseFirestoreException.Code.NOT_FOUND) {
+                PgResult.Success(Unit)
+            } else {
+                PgResult.Failure(mapFirestoreException(e))
+            }
         } catch (e: Exception) {
             PgResult.Failure(PgError.UnknownError("Failed to delete room in Firestore", e))
         }

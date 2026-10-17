@@ -35,11 +35,17 @@ import androidx.compose.material.icons.filled.Assignment
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.OpenInBrowser
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -50,11 +56,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -62,12 +70,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -78,6 +87,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.core.language.rememberTranslation
+import com.example.features.googleform.domain.model.FormAccessRequest
+import com.example.features.googleform.domain.model.FormVersionHistory
 import com.example.features.googleform.domain.model.QuestionKeys
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -97,6 +108,9 @@ fun TenantRegistrationFormScreen(
     val clipboardManager = LocalClipboardManager.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+
+    var showRequestDialog by remember { mutableStateOf(false) }
+    var requestNoteInput by remember { mutableStateOf("") }
 
     // Activity launcher for Google Sign-In with Forms Scope
     val googleSignInLauncher = rememberLauncherForActivityResult(
@@ -118,6 +132,18 @@ fun TenantRegistrationFormScreen(
         uiState.errorMessage?.let { err ->
             snackbarHostState.showSnackbar(err)
             viewModel.clearMessages()
+        }
+    }
+
+    // Auto-refresh request status on screen launch or when property/account changes if there is a pending request or non-owner connected
+    LaunchedEffect(uiState.propertyId, uiState.googleAccount.email, uiState.myPendingRequest?.status) {
+        if (uiState.propertyId.isNotBlank() && uiState.googleAccount.isConnected) {
+            val isOriginalOwner = uiState.googleAccount.email.isNotBlank() &&
+                    uiState.form?.googleAccountEmail?.isNotBlank() == true &&
+                    uiState.googleAccount.email.equals(uiState.form?.googleAccountEmail, ignoreCase = true)
+            if (!isOriginalOwner && (uiState.myPendingRequest == null || uiState.myPendingRequest?.isPending == true)) {
+                viewModel.checkFormAccessRequestStatus()
+            }
         }
     }
 
@@ -191,6 +217,11 @@ fun TenantRegistrationFormScreen(
                     isConnected = uiState.googleAccount.isConnected,
                     accountEmail = uiState.googleAccount.email,
                     displayName = uiState.googleAccount.displayName,
+                    formOwnerEmail = uiState.form?.googleAccountEmail ?: "",
+                    myRequest = uiState.myPendingRequest,
+                    isSubmittingRequest = uiState.isSubmittingRequest,
+                    onRequestAccessClick = { showRequestDialog = true },
+                    onRegenerateClick = { viewModel.setShowReplaceConfirmDialog(true) },
                     onConnectClick = {
                         val intent = viewModel.getGoogleSignInIntent()
                         googleSignInLauncher.launch(intent)
@@ -201,9 +232,27 @@ fun TenantRegistrationFormScreen(
                 )
             }
 
-            // 3. Form Status & Action Section
+            // 3. Incoming Pending Access Requests Card (For Form Owner)
+            if (uiState.incomingPendingRequests.isNotEmpty()) {
+                item {
+                    IncomingAccessRequestsCard(
+                        requests = uiState.incomingPendingRequests,
+                        isApproving = uiState.isApprovingRequest,
+                        isRejecting = uiState.isRejectingRequest,
+                        onApproveClick = { requestId -> viewModel.approveFormAccessRequest(requestId) },
+                        onRejectClick = { requestId -> viewModel.rejectFormAccessRequest(requestId) }
+                    )
+                }
+            }
+
+            // 4. Form Status & Action Section
             val form = uiState.form
             val isGoogleConnected = uiState.googleAccount.isConnected
+            val myGoogleEmail = uiState.googleAccount.email
+            val formOwnerEmail = form?.googleAccountEmail ?: ""
+            val isOriginalOwner = myGoogleEmail.isNotBlank() && formOwnerEmail.isNotBlank() && myGoogleEmail.equals(formOwnerEmail, ignoreCase = true)
+            val myReq = uiState.myPendingRequest
+            val isApprovedEditor = myReq?.isApproved == true
 
             if (isGoogleConnected) {
                 if (form == null || (!form.published && !form.active)) {
@@ -222,18 +271,28 @@ fun TenantRegistrationFormScreen(
                         FormUnavailableCard(
                             lastError = form.lastError ?: unavailableText,
                             isCreating = uiState.isCreating,
-                            onCreateReplacementClick = { viewModel.createReplacementForm() },
+                            onCreateReplacementClick = { viewModel.setShowReplaceConfirmDialog(true) },
                             buttonText = createReplacementText
                         )
                     }
                 } else {
-                    // State C: Form is Active & Ready
+                    // State C: Form is Active
                     item {
                         ActiveFormCard(
                             formTitle = form.formTitle,
                             responderUri = form.responderUri,
+                            editUri = form.editUri,
+                            formOwnerEmail = formOwnerEmail,
+                            connectedEmail = myGoogleEmail,
+                            isOriginalOwner = isOriginalOwner,
+                            isApprovedEditor = isApprovedEditor,
+                            myRequest = myReq,
                             lastCheckedAt = form.lastCheckedAt,
                             isCheckingStatus = uiState.isCheckingStatus,
+                            isCreating = uiState.isCreating,
+                            isSubmittingRequest = uiState.isSubmittingRequest,
+                            onRequestAccessClick = { showRequestDialog = true },
+                            onCheckRequestStatusClick = { viewModel.checkFormAccessRequestStatus() },
                             onShareClick = {
                                 val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                     type = "text/plain"
@@ -261,7 +320,19 @@ fun TenantRegistrationFormScreen(
                                     }
                                 }
                             },
-                            onCheckStatusClick = { viewModel.checkStatus() }
+                            onEditClick = {
+                                try {
+                                    val uriToOpen = if (form.editUri.isNotBlank()) form.editUri else "https://docs.google.com/forms/d/${form.formId}/edit"
+                                    val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(uriToOpen))
+                                    context.startActivity(browserIntent)
+                                } catch (_: Exception) {
+                                    scope.launch {
+                                        snackbarHostState.showSnackbar("Unable to open Google Forms editor")
+                                    }
+                                }
+                            },
+                            onCheckStatusClick = { viewModel.checkStatus() },
+                            onRegenerateClick = { viewModel.setShowReplaceConfirmDialog(true) }
                         )
 
                         Spacer(modifier = Modifier.height(14.dp))
@@ -388,11 +459,87 @@ fun TenantRegistrationFormScreen(
                 }
             }
 
-            // 4. Questions Structure Preview Card
+            // 5. Form History Card
+            if (uiState.formHistory.isNotEmpty()) {
+                item {
+                    FormHistoryCard(history = uiState.formHistory)
+                }
+            }
+
+            // 6. Questions Structure Preview Card
             item {
                 QuestionsPreviewCard()
             }
         }
+    }
+
+    // Dialog for requesting access
+    if (showRequestDialog) {
+        AlertDialog(
+            onDismissRequest = { showRequestDialog = false },
+            title = { Text("Request Form Access", fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text(
+                        text = "Request Editor permissions from form owner (${uiState.form?.googleAccountEmail ?: "Form Owner"}).",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color(0xFF475569)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = requestNoteInput,
+                        onValueChange = { requestNoteInput = it },
+                        label = { Text("Optional Note for Owner") },
+                        placeholder = { Text("e.g. Need editor access to manage registrations") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.requestFormAccess(requestNoteInput)
+                        showRequestDialog = false
+                        requestNoteInput = ""
+                    }
+                ) {
+                    Text("Submit Request")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRequestDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Dialog for confirming form replacement
+    if (uiState.showReplaceConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { viewModel.setShowReplaceConfirmDialog(false) },
+            title = { Text("Replace Registration Form?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    text = "Creating a replacement registration form will generate a new active Google Form link for prospective tenants.\n\nThe current form link will change, but all previous form links, versions, and imported tenant submissions will be preserved in form history.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color(0xFF334155)
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.confirmCreateReplacementForm() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
+                ) {
+                    Text("Confirm & Create Replacement")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.setShowReplaceConfirmDialog(false) }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 
@@ -450,6 +597,11 @@ private fun GoogleAccountConnectionCard(
     isConnected: Boolean,
     accountEmail: String,
     displayName: String,
+    formOwnerEmail: String,
+    myRequest: FormAccessRequest? = null,
+    isSubmittingRequest: Boolean = false,
+    onRequestAccessClick: () -> Unit = {},
+    onRegenerateClick: () -> Unit = {},
     onConnectClick: () -> Unit,
     onDisconnectClick: () -> Unit
 ) {
@@ -556,6 +708,15 @@ private fun GoogleAccountConnectionCard(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
+                        if (formOwnerEmail.isNotBlank() && !accountEmail.equals(formOwnerEmail, ignoreCase = true)) {
+                            Text(
+                                text = "Original Form Owner: $formOwnerEmail",
+                                fontSize = 11.5.sp,
+                                color = Color(0xFF2563EB),
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+                        }
                     }
 
                     OutlinedButton(
@@ -574,6 +735,63 @@ private fun GoogleAccountConnectionCard(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium
                         )
+                    }
+                }
+
+                // If connected account is not the form owner, present request permission action button
+                if (formOwnerEmail.isNotBlank() && !accountEmail.equals(formOwnerEmail, ignoreCase = true)) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    if (myRequest?.isApproved == true) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFFDCFCE7),
+                            border = BorderStroke(1.dp, Color(0xFF86EFAC)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF16A34A), modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Editor Access Granted & Verified by $formOwnerEmail",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF166534),
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    } else if (myRequest?.isPending == true) {
+                        // Pending status with action buttons is displayed in the Active Form section below
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = onRequestAccessClick,
+                                enabled = !isSubmittingRequest,
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(40.dp)
+                                    .testTag("request_permission_button")
+                            ) {
+                                Icon(imageVector = Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Request Permission from Owner", fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            OutlinedButton(
+                                onClick = onRegenerateClick,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(38.dp)
+                                    .testTag("set_active_form_button")
+                            ) {
+                                Text("Set Active Form with Connected Account ($accountEmail)", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
                     }
                 }
             } else {
@@ -608,30 +826,133 @@ private fun GoogleAccountConnectionCard(
 }
 
 @Composable
+private fun IncomingAccessRequestsCard(
+    requests: List<FormAccessRequest>,
+    isApproving: Boolean,
+    isRejecting: Boolean,
+    onApproveClick: (String) -> Unit,
+    onRejectClick: (String) -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFBEB)),
+        border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+        modifier = Modifier.fillMaxWidth().testTag("incoming_access_requests_card")
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.PersonAdd,
+                    contentDescription = null,
+                    tint = Color(0xFFD97706),
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Incoming Form Access Requests (${requests.size})",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    color = Color(0xFF92400E)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            requests.forEach { req ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color.White, RoundedCornerShape(12.dp))
+                        .border(1.dp, Color(0xFFFEF3C7), RoundedCornerShape(12.dp))
+                        .padding(12.dp)
+                ) {
+                    Text(
+                        text = "${req.requesterName} (${req.requesterGoogleEmail})",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = Color(0xFF1E293B)
+                    )
+                    Text(
+                        text = "Requested Editor access for: ${req.formTitle}",
+                        fontSize = 12.sp,
+                        color = Color(0xFF64748B),
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                    if (req.requestNote.isNotBlank()) {
+                        Text(
+                            text = "Note: \"${req.requestNote}\"",
+                            fontSize = 12.sp,
+                            color = Color(0xFF475569),
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { onRejectClick(req.requestId) },
+                            enabled = !isRejecting,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f).height(38.dp)
+                        ) {
+                            Text("Reject", fontSize = 12.sp, color = Color(0xFFEF4444))
+                        }
+
+                        Button(
+                            onClick = { onApproveClick(req.requestId) },
+                            enabled = !isApproving,
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
+                            modifier = Modifier.weight(2f).height(38.dp)
+                        ) {
+                            if (isApproving) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                            } else {
+                                Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Approve & Grant Google Access", fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+        }
+    }
+}
+
+@Composable
 private fun ActiveFormCard(
     formTitle: String,
     responderUri: String,
+    editUri: String,
+    formOwnerEmail: String,
+    connectedEmail: String,
+    isOriginalOwner: Boolean,
+    isApprovedEditor: Boolean = false,
+    myRequest: FormAccessRequest?,
     lastCheckedAt: Long,
     isCheckingStatus: Boolean,
+    isCreating: Boolean,
+    isSubmittingRequest: Boolean,
+    onRequestAccessClick: () -> Unit,
+    onCheckRequestStatusClick: () -> Unit,
     onShareClick: () -> Unit,
     onCopyClick: () -> Unit,
     onOpenClick: () -> Unit,
-    onCheckStatusClick: () -> Unit
+    onEditClick: () -> Unit,
+    onCheckStatusClick: () -> Unit,
+    onRegenerateClick: () -> Unit
 ) {
     val registrationFormText = rememberTranslation("Registration Form")
     val activeText = rememberTranslation("Active")
     val shareFormText = rememberTranslation("Share Form")
     val copyLinkText = rememberTranslation("Copy Link")
     val openFormText = rememberTranslation("Open Form")
-    val lastCheckedText = rememberTranslation("Last checked")
-
-    val formattedTime = remember(lastCheckedAt) {
-        if (lastCheckedAt > 0) {
-            SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(Date(lastCheckedAt))
-        } else {
-            "Just now"
-        }
-    }
 
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -693,168 +1014,219 @@ private fun ActiveFormCard(
                 fontSize = 17.sp
             )
 
+            if (formOwnerEmail.isNotBlank()) {
+                Text(
+                    text = "Owner: $formOwnerEmail",
+                    fontSize = 12.sp,
+                    color = Color(0xFF64748B),
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Responder Link Box
-            Surface(
-                shape = RoundedCornerShape(10.dp),
-                color = Color(0xFFF8FAFC),
-                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
+            // Non-owner / Shared Access Banner Section
+            if (!isOriginalOwner) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .background(
+                            when {
+                                myRequest?.isApproved == true -> Color(0xFFECFDF5)
+                                myRequest?.isPending == true -> Color(0xFFFFFBEB)
+                                myRequest?.isRejected == true -> Color(0xFFFEF2F2)
+                                else -> Color(0xFFEFF6FF)
+                            },
+                            RoundedCornerShape(12.dp)
+                        )
+                        .padding(12.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Link,
-                        contentDescription = null,
-                        tint = Color(0xFF2563EB),
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = responderUri,
-                        fontSize = 12.5.sp,
-                        color = Color(0xFF334155),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
+                    when {
+                        myRequest?.isApproved == true || isApprovedEditor -> {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF16A34A), modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Access Approved", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF166534))
+                            }
+                            Text("Access to this registration form has been verified. Your account ($connectedEmail) has Editor access.", fontSize = 11.5.sp, color = Color(0xFF15803D), modifier = Modifier.padding(top = 2.dp))
+                        }
+                        myRequest?.isPending == true -> {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(imageVector = Icons.Default.Info, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Access Request Pending Owner Approval", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF92400E))
+                            }
+                            Text("Request submitted for $connectedEmail. Waiting for approval from $formOwnerEmail.", fontSize = 11.5.sp, color = Color(0xFFB45309), modifier = Modifier.padding(top = 2.dp))
+                        }
+                        myRequest?.isRejected == true -> {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(imageVector = Icons.Default.Warning, contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Access Request Rejected", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF991B1B))
+                            }
+                            Text("Reason: ${myRequest.rejectionReason ?: "Rejected by form owner."}", fontSize = 11.5.sp, color = Color(0xFFB91C1C), modifier = Modifier.padding(top = 2.dp))
+                        }
+                        else -> {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(imageVector = Icons.Default.Lock, contentDescription = null, tint = Color(0xFF2563EB), modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Form Owned by Another Google Account", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF1E40AF))
+                            }
+                            Text("Connected as $connectedEmail. Request access from $formOwnerEmail to edit or replace this form.", fontSize = 11.5.sp, color = Color(0xFF1D4ED8), modifier = Modifier.padding(top = 2.dp))
+                        }
+                    }
+
+                    if (myRequest?.isApproved != true && !isApprovedEditor) {
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (myRequest?.isPending == true) {
+                                Button(
+                                    onClick = onCheckRequestStatusClick,
+                                    enabled = !isCheckingStatus,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.fillMaxWidth().height(38.dp).testTag("check_request_status_button")
+                                ) {
+                                    if (isCheckingStatus) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            color = MaterialTheme.colorScheme.onPrimary,
+                                            strokeWidth = 2.dp
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Checking Status...", fontSize = 12.sp)
+                                    } else {
+                                        Icon(imageVector = Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Check Request Status", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    }
+                                }
+                            } else {
+                                Button(
+                                    onClick = onRequestAccessClick,
+                                    enabled = !isSubmittingRequest,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.fillMaxWidth().height(38.dp)
+                                ) {
+                                    Text("Request Form Access", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
                 }
+
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            // Public Form URL Box
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFFF1F5F9))
+                    .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(10.dp))
+                    .padding(12.dp)
+            ) {
+                Text(
+                    text = responderUri,
+                    fontSize = 12.sp,
+                    color = Color(0xFF334155),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    fontWeight = FontWeight.Medium
+                )
             }
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Primary Action: Share Form Button
-            Button(
-                onClick = onShareClick,
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF2563EB),
-                    contentColor = Color.White
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .testTag("share_registration_form_button")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Share,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = shareFormText,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.5.sp
-                )
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Secondary Actions: Copy Link & Open Form
+            // Action Buttons Row (Share / Copy / Open)
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                Button(
+                    onClick = onShareClick,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                    modifier = Modifier
+                        .weight(1.2f)
+                        .height(42.dp)
+                        .testTag("share_form_button")
+                ) {
+                    Icon(imageVector = Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(shareFormText, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                }
+
                 OutlinedButton(
                     onClick = onCopyClick,
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = Color(0xFF0F172A)
-                    ),
+                    shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
                         .weight(1f)
-                        .height(44.dp)
-                        .testTag("copy_registration_link_button")
+                        .height(42.dp)
+                        .testTag("copy_link_button")
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.ContentCopy,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = copyLinkText,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    Icon(imageVector = Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(copyLinkText, fontSize = 12.5.sp)
                 }
 
                 OutlinedButton(
                     onClick = onOpenClick,
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = Color(0xFF0F172A)
-                    ),
+                    shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
                         .weight(1f)
-                        .height(44.dp)
-                        .testTag("open_registration_form_button")
+                        .height(42.dp)
+                        .testTag("open_form_button")
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.OpenInBrowser,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = openFormText,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    Icon(imageVector = Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(openFormText, fontSize = 12.5.sp)
                 }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // Last Checked & Verify Status Row
+            // Management Buttons (Edit / Replace / Verify)
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    text = "$lastCheckedText: $formattedTime",
-                    fontSize = 12.sp,
-                    color = Color(0xFF94A3B8)
-                )
+                if (isOriginalOwner || isApprovedEditor || myRequest?.isApproved == true) {
+                    OutlinedButton(
+                        onClick = onEditClick,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.weight(1f).height(38.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Edit Form", fontSize = 11.5.sp)
+                    }
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(enabled = !isCheckingStatus) { onCheckStatusClick() }
-                        .padding(4.dp)
-                        .testTag("check_form_status_button")
+                    OutlinedButton(
+                        onClick = onRegenerateClick,
+                        enabled = !isCreating,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.weight(1f).height(38.dp)
+                    ) {
+                        Text("Replace Form", fontSize = 11.5.sp)
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = onCheckStatusClick,
+                    enabled = !isCheckingStatus,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1f).height(38.dp)
                 ) {
                     if (isCheckingStatus) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(14.dp),
-                            strokeWidth = 2.dp,
-                            color = Color(0xFF2563EB)
-                        )
+                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 1.5.dp)
                     } else {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Check Status",
-                            tint = Color(0xFF2563EB),
-                            modifier = Modifier.size(15.dp)
-                        )
+                        Text("Verify Status", fontSize = 11.5.sp)
                     }
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "Check Status",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF2563EB)
-                    )
                 }
             }
         }
@@ -872,57 +1244,49 @@ private fun FormNotCreatedCard(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(18.dp)
+                .padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFEFF6FF)),
+                contentAlignment = Alignment.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFEFF6FF)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Assignment,
-                        contentDescription = null,
-                        tint = Color(0xFF2563EB),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                Column {
-                    Text(
-                        text = "Tenant Registration Form",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
-                        color = Color(0xFF0F172A)
-                    )
-                    Text(
-                        text = "No active form for $propertyName",
-                        fontSize = 12.sp,
-                        color = Color(0xFF64748B)
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Default.Description,
+                    contentDescription = null,
+                    tint = Color(0xFF2563EB),
+                    modifier = Modifier.size(28.dp)
+                )
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             Text(
-                text = "Generate a structured Google Form for prospective tenants. When tenants fill the form, their details will be organized under this property without needing room or rent assignments upfront.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFF475569),
-                lineHeight = 19.sp
+                text = "No Registration Form Created Yet",
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.5.sp,
+                color = Color(0xFF0F172A)
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = "Generate an official Google Form for $propertyName to collect tenant registrations directly into PG Manager.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color(0xFF64748B),
+                lineHeight = 20.sp
+            )
+
+            Spacer(modifier = Modifier.height(18.dp))
 
             Button(
                 onClick = onCreateFormClick,
@@ -934,21 +1298,14 @@ private fun FormNotCreatedCard(
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp)
+                    .height(46.dp)
                     .testTag("create_registration_form_button")
             ) {
                 if (isCreating) {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
+                        modifier = Modifier.size(20.dp),
                         color = Color.White,
-                        strokeWidth = 2.5.dp
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
+                        strokeWidth = 2.dp
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                 }
@@ -980,76 +1337,104 @@ private fun FormUnavailableCard(
                 .fillMaxWidth()
                 .padding(18.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFFEE2E2)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Warning,
-                        contentDescription = null,
-                        tint = Color(0xFFDC2626),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                Column {
-                    Text(
-                        text = "Registration form unavailable.",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
-                        color = Color(0xFF991B1B)
-                    )
-                    Text(
-                        text = lastError,
-                        fontSize = 12.sp,
-                        color = Color(0xFFB91C1C)
-                    )
-                }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = Color(0xFFDC2626),
+                    modifier = Modifier.size(22.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Registration Form Unavailable",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    color = Color(0xFF991B1B)
+                )
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "The previous Google Form is either deleted or no longer accessible. You can create a fresh replacement form with all standard tenant questions instantly.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFF7F1D1D),
+                text = lastError,
+                fontSize = 13.sp,
+                color = Color(0xFFB91C1C),
                 lineHeight = 18.sp
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             Button(
                 onClick = onCreateReplacementClick,
                 enabled = !isCreating,
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFFDC2626),
-                    contentColor = Color.White
-                ),
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp)
+                    .height(42.dp)
                     .testTag("create_replacement_form_button")
             ) {
                 if (isCreating) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        color = Color.White,
-                        strokeWidth = 2.5.dp
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(6.dp))
                 }
-                Text(
-                    text = buttonText,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.5.sp
+                Text(text = buttonText, fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FormHistoryCard(history: List<FormVersionHistory>) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        modifier = Modifier.fillMaxWidth().testTag("form_history_card")
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.History,
+                    contentDescription = null,
+                    tint = Color(0xFF475569),
+                    modifier = Modifier.size(20.dp)
                 )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Form Version History (${history.size})",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    color = Color(0xFF1E293B)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            history.forEach { item ->
+                val dateStr = remember(item.replacedAt) {
+                    SimpleDateFormat("MMM d, yyyy h:mm a", Locale.getDefault()).format(Date(item.replacedAt))
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 6.dp)
+                        .background(Color(0xFFF8FAFC), RoundedCornerShape(10.dp))
+                        .padding(10.dp)
+                ) {
+                    Text(
+                        text = "v${item.formVersion} • ${item.formTitle}",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = Color(0xFF0F172A)
+                    )
+                    Text(
+                        text = "Replaced on $dateStr ${if (item.replacedByEmail.isNotBlank()) "by ${item.replacedByEmail}" else ""}",
+                        fontSize = 11.5.sp,
+                        color = Color(0xFF64748B),
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
             }
         }
     }
@@ -1057,9 +1442,7 @@ private fun FormUnavailableCard(
 
 @Composable
 private fun QuestionsPreviewCard() {
-    val questionsTitle = rememberTranslation("Questions Included in Registration Form")
-    val requiredTitle = rememberTranslation("Required Questions")
-    val optionalTitle = rememberTranslation("Optional Questions")
+    val questions = remember { QuestionKeys.ALL_QUESTIONS }
 
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -1074,75 +1457,41 @@ private fun QuestionsPreviewCard() {
                 .padding(16.dp)
         ) {
             Text(
-                text = questionsTitle,
+                text = "Form Questions (${questions.size} Fields)",
                 fontWeight = FontWeight.Bold,
-                fontSize = 14.5.sp,
+                fontSize = 15.sp,
                 color = Color(0xFF0F172A)
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            // Required Questions List
-            Text(
-                text = requiredTitle,
-                fontSize = 12.5.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFFDC2626)
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            QuestionKeys.REQUIRED_QUESTIONS.forEach { q ->
+            questions.forEach { q ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 3.dp),
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFDC2626))
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = q.title,
                         fontSize = 13.sp,
                         color = Color(0xFF334155),
                         fontWeight = FontWeight.Medium
                     )
-                }
-            }
 
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Optional Questions List
-            Text(
-                text = optionalTitle,
-                fontSize = 12.5.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF2563EB)
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            QuestionKeys.OPTIONAL_QUESTIONS.forEach { q ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 3.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF2563EB))
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = q.title,
-                        fontSize = 13.sp,
-                        color = Color(0xFF334155),
-                        fontWeight = FontWeight.Normal
-                    )
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (q.isRequired) Color(0xFFEFF6FF) else Color(0xFFF1F5F9)
+                    ) {
+                        Text(
+                            text = if (q.isRequired) "Required" else "Optional",
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (q.isRequired) Color(0xFF2563EB) else Color(0xFF64748B),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
                 }
             }
         }

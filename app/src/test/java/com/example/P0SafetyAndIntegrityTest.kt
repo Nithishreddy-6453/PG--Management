@@ -510,7 +510,7 @@ class P0SafetyAndIntegrityTest {
         // 2. Simulate Cold App Start: Fresh CurrentPropertyManager starting with "property_default"
         val context = ApplicationProvider.getApplicationContext<Context>()
         val freshPropertyManager = CurrentPropertyManager(context, propertyDao)
-        assertEquals("property_default", freshPropertyManager.getCurrentPropertyId())
+        assertEquals(propKaranId, freshPropertyManager.getCurrentPropertyId())
 
         // 3. StartupManager bootstrap runs
         val restoredPropId = freshPropertyManager.restoreActiveProperty()

@@ -18,12 +18,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
  * Standardized Global Language Toggle Pill [ EN | తెలుగు ]
- * Used consistently across all screen headers.
+ * Used consistently across all screen headers with rock-solid dimension stability.
  */
 @Composable
 fun GlobalLanguageToggle(
@@ -40,6 +41,8 @@ fun GlobalLanguageToggle(
 
     Box(
         modifier = modifier
+            .width(88.dp)
+            .height(32.dp)
             .clip(RoundedCornerShape(20.dp))
             .background(Color(0xFFF1F5F9))
             .border(BorderStroke(1.dp, Color(0xFFE2E8F0)), RoundedCornerShape(20.dp))
@@ -48,46 +51,53 @@ fun GlobalLanguageToggle(
         contentAlignment = Alignment.Center
     ) {
         Row(
+            modifier = Modifier.fillMaxSize(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
             // EN Pill
             Box(
                 modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
                     .clip(RoundedCornerShape(16.dp))
                     .background(if (isEn) Color(0xFF2563EB) else Color.Transparent)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
-                    ) { onSelect("EN") }
-                    .padding(horizontal = 9.dp, vertical = 4.dp),
+                    ) { onSelect("EN") },
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = "EN",
                     fontSize = 11.5.sp,
                     fontWeight = if (isEn) FontWeight.Bold else FontWeight.SemiBold,
-                    color = if (isEn) Color.White else Color(0xFF64748B)
+                    color = if (isEn) Color.White else Color(0xFF64748B),
+                    textAlign = TextAlign.Center
                 )
             }
 
             // Telugu Pill
             Box(
                 modifier = Modifier
+                    .weight(1.15f)
+                    .fillMaxHeight()
                     .clip(RoundedCornerShape(16.dp))
                     .background(if (isTe) Color(0xFF2563EB) else Color.Transparent)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
                     ) { onSelect("తెలుగు") }
-                    .padding(horizontal = 9.dp, vertical = 4.dp),
+                    .padding(horizontal = 2.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = "తెలుగు",
                     fontSize = 11.5.sp,
                     fontWeight = if (isTe) FontWeight.Bold else FontWeight.SemiBold,
-                    color = if (isTe) Color.White else Color(0xFF64748B)
+                    color = if (isTe) Color.White else Color(0xFF64748B),
+                    textAlign = TextAlign.Center,
+                    maxLines = 1
                 )
             }
         }

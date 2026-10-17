@@ -49,6 +49,12 @@ class CurrentPropertyManager @Inject constructor(
     val currentPropertyIdFlow: Flow<String> = _inMemoryPropertyFlow.asStateFlow()
 
     suspend fun getCurrentPropertyId(): String {
+        if (inMemoryPropertyId == DEFAULT_PROPERTY_ID || inMemoryPropertyId.isBlank()) {
+            val restored = restoreActiveProperty()
+            if (restored.isNotBlank()) {
+                return restored
+            }
+        }
         return inMemoryPropertyId
     }
 

@@ -28,6 +28,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SyncSettingsScreen(
@@ -40,8 +43,16 @@ fun SyncSettingsScreen(
     val conflicts by viewModel.conflicts.collectAsState()
     val syncOperations by viewModel.syncOperations.collectAsState()
     val actionMessage by viewModel.actionMessage.collectAsState()
+    val isDriveSyncing by viewModel.isDriveSyncing.collectAsState()
+    val hasDriveScope = viewModel.hasDriveScope()
     val clipboardManager = LocalClipboardManager.current
     val snackbarHostState = remember { SnackbarHostState() }
+
+    val consentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        viewModel.handleGoogleConsentResult(result.data)
+    }
 
     LaunchedEffect(actionMessage) {
         actionMessage?.let {
@@ -136,6 +147,83 @@ fun SyncSettingsScreen(
                                 modifier = Modifier.size(28.dp).testTag("copy_device_id_button")
                             ) {
                                 Icon(Icons.Default.ContentCopy, contentDescription = "Copy Device ID", modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 1.5. Google Drive Authorization & Media Sync Card
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth().testTag("google_drive_sync_card"),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(modifier = Modifier.padding(spacing.medium)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.CloudSync,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(26.dp)
+                            )
+                            Spacer(modifier = Modifier.width(spacing.small))
+                            Text(
+                                text = "Google Drive Photo & Media Sync",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(spacing.small))
+                        Text(
+                            text = if (hasDriveScope)
+                                "Google Drive is authorized on this device. You can sync tenant photos and documents across all signed-in phones."
+                            else
+                                "Google Drive authorization is required to sync tenant profile photos and KYC documents across phones.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(spacing.medium))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(spacing.small)
+                        ) {
+                            if (!hasDriveScope) {
+                                Button(
+                                    onClick = {
+                                        consentLauncher.launch(viewModel.getDriveConsentIntent())
+                                    },
+                                    modifier = Modifier.weight(1f).testTag("authorise_drive_button")
+                                ) {
+                                    Icon(Icons.Default.VpnKey, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Authorise Drive")
+                                }
+                            }
+
+                            Button(
+                                onClick = {
+                                    if (!hasDriveScope) {
+                                        consentLauncher.launch(viewModel.getDriveConsentIntent())
+                                    } else {
+                                        viewModel.syncAllDriveMedia()
+                                    }
+                                },
+                                enabled = !isDriveSyncing,
+                                colors = if (hasDriveScope) ButtonDefaults.buttonColors() else ButtonDefaults.filledTonalButtonColors(),
+                                modifier = Modifier.weight(1f).testTag("sync_all_photos_button")
+                            ) {
+                                if (isDriveSyncing) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Syncing...")
+                                } else {
+                                    Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Sync Drive Photos")
+                                }
                             }
                         }
                     }

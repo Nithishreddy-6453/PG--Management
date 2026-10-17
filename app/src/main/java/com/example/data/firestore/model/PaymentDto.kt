@@ -10,6 +10,7 @@ data class PaymentDto(
     val propertyId: String = "property_default",
     val localId: Int = 0,
     val tenantId: Int = 0,
+    val tenantCloudId: String = "",
     val tenantName: String = "",
     val roomNumber: String = "",
     val billingMonth: String = "",

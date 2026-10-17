@@ -37,23 +37,53 @@ data class TextQuestion(
 )
 
 @JsonClass(generateAdapter = true)
+data class ChoiceOption(
+    @Json(name = "value") val value: String
+)
+
+@JsonClass(generateAdapter = true)
+data class ChoiceQuestion(
+    @Json(name = "type") val type: String = "DROP_DOWN",
+    @Json(name = "options") val options: List<ChoiceOption>? = null,
+    @Json(name = "shuffle") val shuffle: Boolean = false
+)
+
+@JsonClass(generateAdapter = true)
 data class Question(
     @Json(name = "questionId") val questionId: String? = null,
     @Json(name = "required") val required: Boolean = false,
-    @Json(name = "textQuestion") val textQuestion: TextQuestion? = TextQuestion()
+    @Json(name = "textQuestion") val textQuestion: TextQuestion? = null,
+    @Json(name = "choiceQuestion") val choiceQuestion: ChoiceQuestion? = null,
+    @Json(name = "dateQuestion") val dateQuestion: Any? = null,
+    @Json(name = "timeQuestion") val timeQuestion: Any? = null,
+    @Json(name = "scaleQuestion") val scaleQuestion: Any? = null,
+    @Json(name = "fileUploadQuestion") val fileUploadQuestion: Any? = null,
+    @Json(name = "rowQuestion") val rowQuestion: Any? = null
 )
 
 @JsonClass(generateAdapter = true)
 data class QuestionItem(
-    @Json(name = "question") val question: Question
+    @Json(name = "question") val question: Question? = null,
+    @Json(name = "image") val image: Any? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class QuestionGroupItem(
+    @Json(name = "questions") val questions: List<Question>? = null,
+    @Json(name = "image") val image: Any? = null,
+    @Json(name = "grid") val grid: Any? = null
 )
 
 @JsonClass(generateAdapter = true)
 data class FormItem(
     @Json(name = "itemId") val itemId: String? = null,
-    @Json(name = "title") val title: String,
+    @Json(name = "title") val title: String? = null,
     @Json(name = "description") val description: String? = null,
-    @Json(name = "questionItem") val questionItem: QuestionItem? = null
+    @Json(name = "questionItem") val questionItem: QuestionItem? = null,
+    @Json(name = "questionGroupItem") val questionGroupItem: QuestionGroupItem? = null,
+    @Json(name = "pageBreakItem") val pageBreakItem: Any? = null,
+    @Json(name = "textItem") val textItem: Any? = null,
+    @Json(name = "imageItem") val imageItem: Any? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -113,27 +143,11 @@ data class BatchUpdateResponse(
 )
 
 @JsonClass(generateAdapter = true)
-data class TextAnswerValue(
-    @Json(name = "value") val value: String? = null
-)
-
-@JsonClass(generateAdapter = true)
-data class TextAnswers(
-    @Json(name = "answers") val answers: List<TextAnswerValue>? = null
-)
-
-@JsonClass(generateAdapter = true)
-data class FormAnswer(
-    @Json(name = "questionId") val questionId: String? = null,
-    @Json(name = "textAnswers") val textAnswers: TextAnswers? = null
-)
-
-@JsonClass(generateAdapter = true)
 data class FormResponseSubmission(
     @Json(name = "responseId") val responseId: String,
     @Json(name = "createTime") val createTime: String? = null,
     @Json(name = "lastSubmittedTime") val lastSubmittedTime: String? = null,
-    @Json(name = "answers") val answers: Map<String, FormAnswer>? = null
+    @Json(name = "answers") val answers: Map<String, Any>? = null
 )
 
 @JsonClass(generateAdapter = true)

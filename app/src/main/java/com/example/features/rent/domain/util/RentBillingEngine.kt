@@ -269,20 +269,33 @@ object RentBillingEngine {
      * Generates a stable, deterministic cloudId for a rent record to enforce
      * ONE PROPERTY + ONE TENANT + ONE CALENDAR MONTH = ONE RENT RECORD.
      */
-    fun generateDeterministicCloudId(propertyId: String, tenantId: Int, billingMonth: String): String {
+    fun generateDeterministicCloudId(propertyId: String, tenantCloudId: String, billingMonth: String): String {
         val parsed = parseBillingMonth(billingMonth)
         val cleanProp = if (propertyId.isNotBlank()) propertyId.replace("[^a-zA-Z0-9_]".toRegex(), "") else "default"
-        return "payment_${cleanProp}_${tenantId}_${parsed.year}_${parsed.month1Based}"
+        val cleanTenant = if (tenantCloudId.isNotBlank()) tenantCloudId.replace("[^a-zA-Z0-9_]".toRegex(), "") else "unknown"
+        return "payment_${cleanProp}_${cleanTenant}_${parsed.year}_${parsed.month1Based}"
+    }
+
+    fun generateDeterministicCloudId(propertyId: String, tenantId: Int, billingMonth: String): String {
+        return generateDeterministicCloudId(propertyId, tenantId.toString(), billingMonth)
     }
 
     /**
      * Determines payment status based on expected amount, amount paid, and due date.
+     * Uses 0.009 tolerance (paise precision) to avoid floating point anomalies.
      */
     fun calculatePaymentStatus(
         expectedAmount: Double,
         amountPaid: Double,
         dueDateStr: String? = null
     ): String {
+        if (expectedAmount <= 0.0) {
+            return if (amountPaid > 0.0) "Paid" else "Pending"
+        }
+        val remaining = expectedAmount - amountPaid
+        if (remaining <= 0.009) {
+            return if (amountPaid > expectedAmount + 0.009) "Overpaid" else "Paid"
+        }
         if (amountPaid <= 0.0) {
             val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
             return if (!dueDateStr.isNullOrBlank() && dueDateStr < todayStr) {
@@ -291,18 +304,8 @@ object RentBillingEngine {
                 "Pending"
             }
         }
-        if (amountPaid >= expectedAmount && expectedAmount > 0.0) {
-            return if (amountPaid > expectedAmount) "Overpaid" else "Paid"
-        }
-        if (amountPaid > 0.0 && amountPaid < expectedAmount) {
-            val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-            return if (!dueDateStr.isNullOrBlank() && dueDateStr < todayStr) {
-                "Overdue"
-            } else {
-                "Partially Paid"
-            }
-        }
-        return "Paid"
+        // Partial payment: balance remaining and partial amount received
+        return "Partially Paid"
     }
 
     /**
@@ -403,9 +406,18 @@ object RentBillingEngine {
         val totalPaid = activePayments.sumOf { it.amountPaid }
         val totalOutstanding = activePayments.sumOf { (it.amount - it.amountPaid).coerceAtLeast(0.0) }
 
-        val paidTenants = activePayments.count { it.status.equals("Paid", ignoreCase = true) || it.status.equals("Overpaid", ignoreCase = true) }
-        val partialTenants = activePayments.count { it.status.equals("Partially Paid", ignoreCase = true) || it.status.equals("Partial", ignoreCase = true) }
-        val pendingTenants = activePayments.count { it.status.equals("Pending", ignoreCase = true) || it.status.equals("Overdue", ignoreCase = true) }
+        val paidTenants = activePayments.count {
+            val rem = it.amount - it.amountPaid
+            rem <= 0.009 || it.status.equals("Paid", ignoreCase = true) || it.status.equals("Overpaid", ignoreCase = true)
+        }
+        val partialTenants = activePayments.count {
+            val rem = it.amount - it.amountPaid
+            rem > 0.009 && (it.amountPaid > 0.0 || it.status.equals("Partially Paid", ignoreCase = true) || it.status.equals("Partial", ignoreCase = true))
+        }
+        val pendingTenants = activePayments.count {
+            val rem = it.amount - it.amountPaid
+            rem > 0.009 && it.amountPaid <= 0.0
+        }
 
         val collectionPercentage = if (totalExpected > 0) {
             ((totalPaid / totalExpected) * 100.0).coerceIn(0.0, 100.0)

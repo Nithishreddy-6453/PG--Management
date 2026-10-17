@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.Flow
 interface TenantRepository {
     fun getAllTenantsFlow(): Flow<List<TenantEntity>>
     suspend fun getTenantById(id: Int): TenantEntity?
+    suspend fun getTenantByCloudId(cloudId: String): TenantEntity?
     fun getTenantsInRoomFlow(roomNumber: String): Flow<List<TenantEntity>>
     suspend fun getTenantsInRoom(roomNumber: String): List<TenantEntity>
     suspend fun insertTenant(tenant: TenantEntity): Long
@@ -22,6 +23,7 @@ interface TenantRepository {
     fun getAllRoomsFlow(): Flow<List<RoomEntity>>
     suspend fun insertRoom(room: RoomEntity)
     suspend fun getCurrentPropertyId(): String
+    suspend fun getProperty(propertyId: String): com.example.data.database.PropertyEntity?
 
     // Bed operations for assignments & validation
     suspend fun getBed(roomNumber: String, bedId: String): BedEntity?

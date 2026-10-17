@@ -4,7 +4,7 @@ import com.example.core.common.PgError
 import com.example.core.common.PgResult
 import com.example.data.database.TenantRegistrationFormDao
 import com.example.data.database.TenantRegistrationFormEntity
-import com.example.data.firestore.model.TenantRegistrationFormDto
+import com.example.data.firestore.model.*
 import com.example.data.firestore.repository.FirestoreTenantRegistrationFormRepository
 import com.example.features.googleform.data.api.BatchUpdateRequest
 import com.example.features.googleform.data.api.CreateFormInfo
@@ -12,6 +12,8 @@ import com.example.features.googleform.data.api.CreateFormRequest
 import com.example.features.googleform.data.api.CreateItemLocation
 import com.example.features.googleform.data.api.CreateItemRequest
 import com.example.features.googleform.data.api.FormInfo
+import com.example.features.googleform.data.api.ChoiceOption
+import com.example.features.googleform.data.api.ChoiceQuestion
 import com.example.features.googleform.data.api.FormItem
 import com.example.features.googleform.data.api.FormRequestItem
 import com.example.features.googleform.data.api.GoogleFormsApiService
@@ -24,8 +26,11 @@ import com.example.features.googleform.domain.model.TenantRegistrationForm
 import com.example.features.googleform.domain.repository.TenantRegistrationFormRepository
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.util.UUID
@@ -35,7 +40,9 @@ import javax.inject.Singleton
 @Singleton
 class TenantRegistrationFormRepositoryImpl @Inject constructor(
     private val formDao: TenantRegistrationFormDao,
+    private val historyDao: com.example.data.database.FormVersionHistoryDao,
     private val firestoreRepository: FirestoreTenantRegistrationFormRepository,
+    private val accessRequestFirestore: com.example.data.firestore.repository.FirestoreFormAccessRequestRepository,
     private val apiService: GoogleFormsApiService,
     private val authManager: GoogleFormsAuthManager,
     private val firebaseAuth: FirebaseAuth
@@ -44,9 +51,28 @@ class TenantRegistrationFormRepositoryImpl @Inject constructor(
     private val currentOwnerId: String
         get() = firebaseAuth.currentUser?.uid ?: ""
 
-    override fun getFormForPropertyFlow(propertyId: String): Flow<TenantRegistrationForm?> {
-        return formDao.getFormForPropertyFlow(propertyId).map { entity ->
-            entity?.toDomainModel()
+    override fun getFormForPropertyFlow(propertyId: String): Flow<TenantRegistrationForm?> = callbackFlow {
+        // Observe local Room DB
+        val roomJob = launch {
+            formDao.getFormForPropertyFlow(propertyId).collect { entity ->
+                trySend(entity?.toDomainModel())
+            }
+        }
+
+        // Observe Firestore real-time snapshot and sync to local Room DB
+        val firestoreJob = launch {
+            firestoreRepository.observeFormForProperty(propertyId).collect { result ->
+                if (result is PgResult.Success && result.data != null) {
+                    val entity = result.data.toEntity()
+                    formDao.insertOrUpdateForm(entity)
+                    trySend(entity.toDomainModel())
+                }
+            }
+        }
+
+        awaitClose {
+            roomJob.cancel()
+            firestoreJob.cancel()
         }
     }
 
@@ -75,8 +101,30 @@ class TenantRegistrationFormRepositoryImpl @Inject constructor(
     override suspend fun createRegistrationForm(
         propertyId: String,
         propertyName: String
+    ): PgResult<TenantRegistrationForm> = internalCreateForm(propertyId, propertyName, isReplacement = false)
+
+    private suspend fun internalCreateForm(
+        propertyId: String,
+        propertyName: String,
+        isReplacement: Boolean
     ): PgResult<TenantRegistrationForm> = withContext(Dispatchers.IO) {
         try {
+            val googleEmail = authManager.accountInfoFlow.value.email
+
+            // Check if active form already exists in Firestore for this property created by another owner
+            if (!isReplacement) {
+                val existingInFirestore = firestoreRepository.getFormForProperty(propertyId)
+                if (existingInFirestore is PgResult.Success && existingInFirestore.data != null && existingInFirestore.data.active) {
+                    val existing = existingInFirestore.data.toEntity()
+                    formDao.insertOrUpdateForm(existing)
+                    if (existing.googleAccountEmail.isNotBlank() && !existing.googleAccountEmail.equals(googleEmail, ignoreCase = true)) {
+                        return@withContext PgResult.Failure(
+                            PgError.ValidationError("A registration form is already active for $propertyName created by owner (${existing.googleAccountEmail}). Please request permission from the form owner.")
+                        )
+                    }
+                }
+            }
+
             // 1. Authorize Google Forms API
             val authHeaderResult = authManager.getAuthorizationHeader(requireResponsesScope = false)
             val authHeader = when (authHeaderResult) {
@@ -84,7 +132,6 @@ class TenantRegistrationFormRepositoryImpl @Inject constructor(
                 is PgResult.Failure -> return@withContext PgResult.Failure(authHeaderResult.error)
             }
 
-            val googleEmail = authManager.accountInfoFlow.value.email
             val formTitle = "$propertyName – Tenant Registration"
 
             // 2. Create form on Google Forms (The initial POST /v1/forms request MUST contain ONLY title)
@@ -111,16 +158,27 @@ class TenantRegistrationFormRepositoryImpl @Inject constructor(
             // 3. Add required and optional questions in batch
             val questions = QuestionKeys.ALL_QUESTIONS
             val requests = questions.mapIndexed { index, q ->
+                val questionObj = if (!q.choices.isNullOrEmpty()) {
+                    Question(
+                        required = q.isRequired,
+                        choiceQuestion = ChoiceQuestion(
+                            type = "DROP_DOWN",
+                            options = q.choices.map { ChoiceOption(it) }
+                        )
+                    )
+                } else {
+                    Question(
+                        required = q.isRequired,
+                        textQuestion = TextQuestion(paragraph = q.isParagraph)
+                    )
+                }
                 FormRequestItem(
                     createItem = CreateItemRequest(
                         item = FormItem(
                             title = q.title,
                             description = q.description,
                             questionItem = QuestionItem(
-                                question = Question(
-                                    required = q.isRequired,
-                                    textQuestion = TextQuestion(paragraph = q.isParagraph)
-                                )
+                                question = questionObj
                             )
                         ),
                         location = CreateItemLocation(index = index)
@@ -341,8 +399,28 @@ class TenantRegistrationFormRepositoryImpl @Inject constructor(
         propertyId: String,
         propertyName: String
     ): PgResult<TenantRegistrationForm> = withContext(Dispatchers.IO) {
-        // Explicitly create a new form and replace the configuration for this property
-        createRegistrationForm(propertyId, propertyName)
+        val oldEntity = formDao.getFormForProperty(propertyId)
+        val newFormResult = internalCreateForm(propertyId, propertyName, isReplacement = true)
+        if (newFormResult is PgResult.Success && oldEntity != null) {
+            val now = System.currentTimeMillis()
+            val replacedBy = authManager.accountInfoFlow.value.email
+            val historyEntity = com.example.data.database.FormVersionHistoryEntity(
+                id = "hist_${java.util.UUID.randomUUID()}",
+                propertyId = propertyId,
+                formId = oldEntity.formId,
+                formTitle = oldEntity.formTitle,
+                responderUri = oldEntity.responderUri,
+                editUri = oldEntity.editUri,
+                googleAccountEmail = oldEntity.googleAccountEmail,
+                formVersion = oldEntity.formVersion,
+                replacedAt = now,
+                replacedByEmail = replacedBy,
+                createdAt = oldEntity.createdAt
+            )
+            historyDao.insert(historyEntity)
+            accessRequestFirestore.saveHistory(historyEntity.toDto())
+        }
+        newFormResult
     }
 
     override suspend fun deleteForm(propertyId: String): PgResult<Unit> = withContext(Dispatchers.IO) {

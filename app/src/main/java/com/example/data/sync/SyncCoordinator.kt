@@ -58,6 +58,25 @@ class SyncCoordinator @Inject constructor(
         payloadJson: String = ""
     ) {
         logger.i(TAG, "Enqueuing local sync operation: $operationType on $entityType ($entityId)")
+        val existingOps = syncQueueDao.getOperationsByEntity(entityType, entityId)
+        if (existingOps.isNotEmpty()) {
+            if (operationType == "DELETE") {
+                // DELETE supersedes prior pending CREATE/UPDATE operations for this entity
+                syncQueueDao.deleteByEntity(entityType, entityId)
+            } else if (operationType == "UPDATE") {
+                // If a CREATE is already pending, keep it (it will upload latest state)
+                val pendingCreate = existingOps.find { it.operationType == "CREATE" && it.status != "SYNCED" }
+                if (pendingCreate != null) {
+                    logger.d(TAG, "Coalescing: keeping existing pending CREATE for $entityType $entityId instead of duplicate UPDATE")
+                    triggerImmediateSync()
+                    return
+                }
+                // Coalesce prior updates into the latest one
+                syncQueueDao.deleteByEntity(entityType, entityId)
+            } else if (operationType == "CREATE") {
+                syncQueueDao.deleteByEntity(entityType, entityId)
+            }
+        }
         val op = SyncOperationEntity(
             entityType = entityType,
             entityId = entityId,

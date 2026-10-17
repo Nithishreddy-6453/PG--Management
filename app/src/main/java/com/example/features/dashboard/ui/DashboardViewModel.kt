@@ -8,17 +8,15 @@ import com.example.features.properties.data.CurrentPropertyManager
 import com.example.features.rent.domain.util.CurrentBillingMonthManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.launchIn
-import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.flow.onStart
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
 
 sealed interface DashboardUiState {
@@ -45,22 +43,37 @@ class DashboardViewModel @Inject constructor(
     private val currentPropertyManager: CurrentPropertyManager? = null
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow<DashboardUiState>(DashboardUiState.Loading)
-    val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
-
     val currentBillingMonth: StateFlow<String> = currentBillingMonthManager.currentBillingMonthState
 
     private val _uiEffect = MutableSharedFlow<DashboardUiEffect>()
     val uiEffect: SharedFlow<DashboardUiEffect> = _uiEffect.asSharedFlow()
 
-    init {
-        loadDashboardSummary()
+    val uiState: StateFlow<DashboardUiState> = flow {
+        currentPropertyManager?.restoreActiveProperty()
+        emitAll(dashboardSummaryUseCase())
     }
+        .map { summary ->
+            if (summary.occupancy.totalRooms == 0 && summary.occupancy.totalBeds == 0 && summary.occupancy.activeTenantsCount == 0) {
+                DashboardUiState.Empty
+            } else {
+                DashboardUiState.Success(summary)
+            }
+        }
+        .catch { error ->
+            emit(DashboardUiState.Error(error.localizedMessage ?: "Unknown error occurred"))
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = DashboardUiState.Loading
+        )
 
     fun handleEvent(event: DashboardUiEvent) {
         when (event) {
-            is DashboardUiEvent.LoadSummary -> loadDashboardSummary()
-            is DashboardUiEvent.Retry -> loadDashboardSummary()
+            is DashboardUiEvent.LoadSummary,
+            is DashboardUiEvent.Retry -> {
+                // stateIn automatically manages reactivation
+            }
             is DashboardUiEvent.SelectMonth -> selectBillingMonth(event.month)
         }
     }
@@ -68,23 +81,5 @@ class DashboardViewModel @Inject constructor(
     fun selectBillingMonth(month: String) {
         currentBillingMonthManager.setCurrentBillingMonth(month)
     }
-
-    private fun loadDashboardSummary() {
-        viewModelScope.launch {
-            _uiState.value = DashboardUiState.Loading
-            currentPropertyManager?.restoreActiveProperty()
-            dashboardSummaryUseCase()
-                .onEach { summary ->
-                    if (summary.occupancy.totalRooms == 0 && summary.occupancy.totalBeds == 0 && summary.occupancy.activeTenantsCount == 0) {
-                        _uiState.value = DashboardUiState.Empty
-                    } else {
-                        _uiState.value = DashboardUiState.Success(summary)
-                    }
-                }
-                .catch { error ->
-                    _uiState.value = DashboardUiState.Error(error.localizedMessage ?: "Unknown error occurred")
-                }
-                .collect()
-        }
-    }
 }
+

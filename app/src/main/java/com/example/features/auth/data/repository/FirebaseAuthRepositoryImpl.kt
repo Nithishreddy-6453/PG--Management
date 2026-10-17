@@ -55,29 +55,9 @@ class FirebaseAuthRepositoryImpl @Inject constructor(
         return try {
             firebaseAuth.signInWithEmailAndPassword(sanitizedEmail, password).await()
             Result.success(Unit)
-        } catch (e: com.google.firebase.auth.FirebaseAuthInvalidUserException) {
-            Log.w("FirebaseAuth", "User not found: ${e.message}")
-            Result.failure(Exception("No account found with this email. Please switch to Create Account."))
-        } catch (e: FirebaseAuthInvalidCredentialsException) {
-            Log.w("FirebaseAuth", "Invalid credentials entered: ${e.message}")
-            Result.failure(Exception("Incorrect email or password. If you signed up with Google, please use 'Continue with Google'. If you forgot your password, tap 'Forgot password?'."))
-        } catch (e: com.google.firebase.FirebaseNetworkException) {
-            Log.w("FirebaseAuth", "Network exception during signIn: ${e.message}")
-            Result.failure(Exception("Network error. Please check your internet connection and try again."))
-        } catch (e: FirebaseAuthException) {
-            Log.w("FirebaseAuth", "FirebaseAuthException [Code: ${e.errorCode}]: ${e.message}")
-            val msg = when (e.errorCode) {
-                "ERROR_INVALID_EMAIL" -> "Please enter a valid email address."
-                "ERROR_WRONG_PASSWORD", "ERROR_INVALID_CREDENTIAL" -> "Incorrect email or password. If you signed up with Google, use 'Continue with Google'."
-                "ERROR_USER_NOT_FOUND" -> "No account found with this email. Please switch to Create Account."
-                "ERROR_USER_DISABLED" -> "This account has been disabled. Please contact support."
-                "ERROR_TOO_MANY_REQUESTS" -> "Too many failed attempts. Please try again in a few minutes."
-                else -> e.message ?: "Authentication failed. Please try again."
-            }
-            Result.failure(Exception(msg))
         } catch (e: Exception) {
-            Log.w("FirebaseAuth", "signInWithEmail unexpected error: ${e.message}")
-            Result.failure(Exception(e.message ?: "Authentication failed. Please try again."))
+            Log.w("FirebaseAuth", "signInWithEmail exception [${e.javaClass.simpleName}]: ${e.message}")
+            Result.failure(Exception(mapFirebaseSignInException(e)))
         }
     }
 
@@ -96,28 +76,9 @@ class FirebaseAuthRepositoryImpl @Inject constructor(
         return try {
             firebaseAuth.createUserWithEmailAndPassword(sanitizedEmail, password).await()
             Result.success(Unit)
-        } catch (e: com.google.firebase.auth.FirebaseAuthUserCollisionException) {
-            Log.w("FirebaseAuth", "User collision: ${e.message}")
-            Result.failure(Exception("An account with this email already exists. Please switch to Sign In or use Google Sign-In."))
-        } catch (e: com.google.firebase.auth.FirebaseAuthWeakPasswordException) {
-            Log.w("FirebaseAuth", "Weak password: ${e.message}")
-            Result.failure(Exception("Password is too weak. Please use at least 6 characters."))
-        } catch (e: com.google.firebase.FirebaseNetworkException) {
-            Log.w("FirebaseAuth", "Network exception during signUp: ${e.message}")
-            Result.failure(Exception("Network error. Please check your internet connection and try again."))
-        } catch (e: FirebaseAuthException) {
-            Log.w("FirebaseAuth", "FirebaseAuthException [Code: ${e.errorCode}]: ${e.message}")
-            val msg = when (e.errorCode) {
-                "ERROR_EMAIL_ALREADY_IN_USE" -> "An account with this email already exists. Please switch to Sign In."
-                "ERROR_WEAK_PASSWORD" -> "Password is too weak. Please use at least 6 characters."
-                "ERROR_INVALID_EMAIL" -> "Please enter a valid email address."
-                "ERROR_TOO_MANY_REQUESTS" -> "Too many failed attempts. Please try again in a few minutes."
-                else -> e.message ?: "Account registration failed. Please try again."
-            }
-            Result.failure(Exception(msg))
         } catch (e: Exception) {
-            Log.w("FirebaseAuth", "signUpWithEmail failed: ${e.message}")
-            Result.failure(Exception(e.message ?: "Account registration failed. Please try again."))
+            Log.w("FirebaseAuth", "signUpWithEmail exception [${e.javaClass.simpleName}]: ${e.message}")
+            Result.failure(Exception(mapFirebaseSignUpException(e)))
         }
     }
 
@@ -179,6 +140,72 @@ class FirebaseAuthRepositoryImpl @Inject constructor(
             firebaseAuth.currentUser?.email
         } catch (e: Exception) {
             null
+        }
+    }
+
+    companion object {
+        fun mapFirebaseSignInException(e: Exception): String {
+            val fullMessage = ((e.message ?: "") + " " + (e.localizedMessage ?: "") + " " + (e.cause?.message ?: ""))
+            if (fullMessage.contains("supplied auth credential", ignoreCase = true) ||
+                fullMessage.contains("credential is incorrect", ignoreCase = true) ||
+                fullMessage.contains("malformed or has expired", ignoreCase = true) ||
+                fullMessage.contains("RecaptchaAction", ignoreCase = true) ||
+                fullMessage.contains("Recaptcha", ignoreCase = true) ||
+                fullMessage.contains("signInWithPassword", ignoreCase = true) ||
+                fullMessage.contains("auth credential", ignoreCase = true) ||
+                fullMessage.contains("INVALID_LOGIN_CREDENTIALS", ignoreCase = true) ||
+                fullMessage.contains("INVALID_CREDENTIAL", ignoreCase = true) ||
+                fullMessage.contains("wrong-password", ignoreCase = true)
+            ) {
+                return "Couldn't sign in with email and password. If you originally registered with Google, select 'Continue with Google'. Otherwise, check your email and password."
+            }
+
+            return when (e) {
+                is com.google.firebase.auth.FirebaseAuthInvalidUserException -> {
+                    "No account found with this email. Please switch to Create Account."
+                }
+                is FirebaseAuthInvalidCredentialsException -> {
+                    "Couldn't sign in with email and password. If you originally registered with Google, select 'Continue with Google'. Otherwise, check your email and password."
+                }
+                is com.google.firebase.FirebaseNetworkException -> {
+                    "Network error. Please check your internet connection and try again."
+                }
+                is FirebaseAuthException -> {
+                    when (e.errorCode) {
+                        "ERROR_INVALID_EMAIL" -> "Please enter a valid email address."
+                        "ERROR_WRONG_PASSWORD", "ERROR_INVALID_CREDENTIAL" -> "Couldn't sign in with email and password. If you originally registered with Google, select 'Continue with Google'. Otherwise, check your email and password."
+                        "ERROR_USER_NOT_FOUND" -> "No account found with this email. Please switch to Create Account."
+                        "ERROR_USER_DISABLED" -> "This account has been disabled. Please contact support."
+                        "ERROR_TOO_MANY_REQUESTS" -> "Too many failed attempts. Please try again in a few minutes."
+                        else -> e.message ?: "Authentication failed. Please try again."
+                    }
+                }
+                else -> e.message ?: "Authentication failed. Please try again."
+            }
+        }
+
+        fun mapFirebaseSignUpException(e: Exception): String {
+            return when (e) {
+                is com.google.firebase.auth.FirebaseAuthUserCollisionException -> {
+                    "An account with this email already exists. Please switch to Sign In or use Google Sign-In."
+                }
+                is com.google.firebase.auth.FirebaseAuthWeakPasswordException -> {
+                    "Password is too weak. Please use at least 6 characters."
+                }
+                is com.google.firebase.FirebaseNetworkException -> {
+                    "Network error. Please check your internet connection and try again."
+                }
+                is FirebaseAuthException -> {
+                    when (e.errorCode) {
+                        "ERROR_EMAIL_ALREADY_IN_USE" -> "An account with this email already exists. Please switch to Sign In."
+                        "ERROR_WEAK_PASSWORD" -> "Password is too weak. Please use at least 6 characters."
+                        "ERROR_INVALID_EMAIL" -> "Please enter a valid email address."
+                        "ERROR_TOO_MANY_REQUESTS" -> "Too many failed attempts. Please try again in a few minutes."
+                        else -> e.message ?: "Account registration failed. Please try again."
+                    }
+                }
+                else -> e.message ?: "Account registration failed. Please try again."
+            }
         }
     }
 }

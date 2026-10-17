@@ -26,12 +26,36 @@ class FirestorePropertyRepository @Inject constructor(
     suspend fun saveProperty(propertyDto: PropertyDto): PgResult<Unit> {
         return try {
             val docId = if (propertyDto.id.isNotBlank()) propertyDto.id else "prop_${currentOwnerId}"
+            val now = if (propertyDto.updatedAt > 0) propertyDto.updatedAt else System.currentTimeMillis()
             val dtoToSave = propertyDto.copy(
                 id = docId,
                 ownerId = if (propertyDto.ownerId.isNotBlank()) propertyDto.ownerId else currentOwnerId,
-                updatedAt = System.currentTimeMillis()
+                updatedAt = now
             )
-            collection.document(docId).set(dtoToSave).await()
+            val docRef = collection.document(docId)
+            firestore.runTransaction { transaction ->
+                val snapshot = transaction.get(docRef)
+                if (snapshot.exists()) {
+                    val remoteVersion = snapshot.getLong("version")?.toInt() ?: 1
+                    val remoteUpdatedAt = snapshot.getLong("updatedAt") ?: 0L
+                    val remoteDeleted = snapshot.getBoolean("deleted") ?: false
+                    val remoteDeviceId = snapshot.getString("lastModifiedByDeviceId") ?: ""
+
+                    // Idempotency: Reject stale write that would resurrect a deleted record
+                    if (remoteDeleted && !dtoToSave.deleted) {
+                        return@runTransaction
+                    }
+                    // Idempotency: Reject stale write if remote document is strictly newer
+                    if (remoteVersion > dtoToSave.version) {
+                        return@runTransaction
+                    }
+                    // Idempotency: Reject stale write if remote has equal version but newer timestamp from another device
+                    if (remoteVersion == dtoToSave.version && remoteUpdatedAt > dtoToSave.updatedAt && remoteDeviceId.isNotBlank() && remoteDeviceId != dtoToSave.lastModifiedByDeviceId) {
+                        return@runTransaction
+                    }
+                }
+                transaction.set(docRef, dtoToSave)
+            }.await()
             PgResult.Success(Unit)
         } catch (e: FirebaseFirestoreException) {
             PgResult.Failure(mapFirestoreException(e))
@@ -42,16 +66,29 @@ class FirestorePropertyRepository @Inject constructor(
 
     suspend fun deleteProperty(propertyId: String, deviceId: String = ""): PgResult<Unit> {
         return try {
-            collection.document(propertyId).update(
-                mapOf(
-                    "deleted" to true,
-                    "updatedAt" to System.currentTimeMillis(),
-                    "lastModifiedByDeviceId" to deviceId
-                )
-            ).await()
+            val docRef = collection.document(propertyId)
+            firestore.runTransaction { transaction ->
+                val snapshot = transaction.get(docRef)
+                if (snapshot.exists()) {
+                    val currentVersion = snapshot.getLong("version")?.toInt() ?: 1
+                    val updates = mutableMapOf<String, Any>(
+                        "deleted" to true,
+                        "version" to currentVersion + 1,
+                        "updatedAt" to System.currentTimeMillis()
+                    )
+                    if (deviceId.isNotBlank()) {
+                        updates["lastModifiedByDeviceId"] = deviceId
+                    }
+                    transaction.update(docRef, updates)
+                }
+            }.await()
             PgResult.Success(Unit)
         } catch (e: FirebaseFirestoreException) {
-            PgResult.Failure(mapFirestoreException(e))
+            if (e.code == FirebaseFirestoreException.Code.NOT_FOUND) {
+                PgResult.Success(Unit)
+            } else {
+                PgResult.Failure(mapFirestoreException(e))
+            }
         } catch (e: Exception) {
             PgResult.Failure(PgError.UnknownError("Failed to delete property in Firestore", e))
         }

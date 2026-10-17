@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -18,7 +19,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -30,29 +30,26 @@ import com.example.core.designsystem.MainTab
 import com.example.core.language.rememberTranslation
 import com.example.data.database.RentPaymentEntity
 import com.example.features.rent.domain.model.MonthGenerationPreview
-import com.example.features.rent.domain.model.TenantMonthPreview
-import com.example.features.rent.domain.util.RentBillingEngine
 import com.example.features.rent.ui.viewmodel.RentLedgerUiState
 import com.example.features.rent.ui.viewmodel.RentLedgerViewModel
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RentLedgerScreen(
     onNavigateBack: () -> Unit,
     onNavigateToPaymentDetails: (Int) -> Unit,
-    onNavigateToRecordPayment: () -> Unit = {},
+    onNavigateToRecordPayment: (Int?, String?) -> Unit = { _, _ -> },
     onNavigate: (String) -> Unit = {},
     viewModel: RentLedgerViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    val titleText = rememberTranslation("Rent Ledger")
-    val subtitleText = rememberTranslation("Track all rent payments")
+    val titleText = rememberTranslation("Payments")
+    val subtitleText = rememberTranslation("Lakshmi...")
 
-    var showQuickPayDialog by remember { mutableStateOf<RentPaymentEntity?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // Display feedback message
     LaunchedEffect((uiState as? RentLedgerUiState.Success)?.feedbackMessage) {
         val msg = (uiState as? RentLedgerUiState.Success)?.feedbackMessage
         if (msg != null) {
@@ -67,7 +64,7 @@ fun RentLedgerScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color.White)
+                    .background(MaterialTheme.colorScheme.surface)
                     .statusBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
@@ -76,36 +73,85 @@ fun RentLedgerScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
                         IconButton(
                             onClick = onNavigateBack,
-                            modifier = Modifier.size(40.dp)
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), CircleShape)
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = rememberTranslation("Back"),
-                                tint = Color(0xFF1E293B)
+                                tint = MaterialTheme.colorScheme.onSurface
                             )
                         }
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(12.dp))
                         Column {
-                            Text(
-                                text = titleText,
-                                style = MaterialTheme.typography.titleLarge.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF1E293B)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = titleText,
+                                    style = MaterialTheme.typography.titleLarge.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
-                            )
+                                Icon(
+                                    imageVector = Icons.Default.ArrowDropDown,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                             Text(
                                 text = subtitleText,
                                 style = MaterialTheme.typography.bodySmall.copy(
-                                    color = Color(0xFF64748B)
-                                )
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
 
-                    com.example.core.language.GlobalLanguageToggle()
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        com.example.core.language.GlobalLanguageToggle()
+                        IconButton(
+                            onClick = { },
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Notifications,
+                                contentDescription = rememberTranslation("Notifications"),
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        IconButton(
+                            onClick = { onNavigate(com.example.navigation.Screen.Settings.route) },
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = rememberTranslation("Settings"),
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
                 }
             }
         },
@@ -115,29 +161,7 @@ fun RentLedgerScreen(
                 onNavigate = onNavigate
             )
         },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = onNavigateToRecordPayment,
-                containerColor = Color(0xFF1769D1),
-                contentColor = Color.White,
-                shape = RoundedCornerShape(32.dp),
-                modifier = Modifier.padding(bottom = 12.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = rememberTranslation("Add Payment"),
-                    style = MaterialTheme.typography.labelLarge.copy(
-                        fontWeight = FontWeight.Bold
-                    )
-                )
-            }
-        },
-        containerColor = Color(0xFFF8FAFC)
+        containerColor = MaterialTheme.colorScheme.background
     ) { paddingValues ->
         Box(
             modifier = Modifier
@@ -156,20 +180,21 @@ fun RentLedgerScreen(
                     }
                 }
                 is RentLedgerUiState.Success -> {
-                    LedgerContent(
+                    RentDashboardContent(
                         state = state,
                         onSearchQueryChanged = viewModel::updateSearchQuery,
                         onStatusFilterChanged = viewModel::updateStatusFilter,
                         onMonthFilterChanged = viewModel::updateMonthFilter,
-                        onRequestPreview = viewModel::requestMonthPreview,
+                        onRequestPreview = { viewModel.requestMonthPreview() },
                         onPaymentClick = onNavigateToPaymentDetails,
-                        onQuickPayClick = { showQuickPayDialog = it }
+                        onQuickPayClick = { payment -> onNavigateToRecordPayment(payment.tenantId, payment.billingMonth) },
+                        onNavigateToRecordPayment = onNavigateToRecordPayment,
+                        onNavigate = onNavigate
                     )
 
-                    // Month Generation Preview Modal Bottom Sheet
                     if (state.previewData != null) {
                         MonthGenerationPreviewSheet(
-                            preview = state.previewData,
+                            preview = state.previewData!!,
                             isGenerating = state.isGenerating,
                             onDismiss = viewModel::dismissPreview,
                             onConfirm = { month, backupPrev ->
@@ -181,94 +206,25 @@ fun RentLedgerScreen(
             }
         }
     }
-
-    // Quick Payment Recording Dialog
-    if (showQuickPayDialog != null) {
-        val payment = showQuickPayDialog!!
-        val remaining = (payment.amount - payment.amountPaid).coerceAtLeast(0.0)
-        var enteredAmount by remember { mutableStateOf(if (remaining > 0) remaining.toString() else payment.amount.toString()) }
-        var selectedMode by remember { mutableStateOf("UPI") }
-
-        AlertDialog(
-            onDismissRequest = { showQuickPayDialog = null },
-            title = {
-                Text(
-                    text = "${rememberTranslation("Record Payment")}: ${payment.tenantName}",
-                    fontWeight = FontWeight.Bold
-                )
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        text = "${rememberTranslation("Billing Month")}: ${payment.billingMonth}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color(0xFF64748B)
-                    )
-                    Text(
-                        text = "${rememberTranslation("Expected Rent")}: ₹${payment.amount}  |  ${rememberTranslation("Already Paid")}: ₹${payment.amountPaid}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFF475569)
-                    )
-
-                    OutlinedTextField(
-                        value = enteredAmount,
-                        onValueChange = { enteredAmount = it },
-                        label = { Text(rememberTranslation("Amount to Pay (₹)")) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Text(rememberTranslation("Payment Mode"), style = MaterialTheme.typography.labelMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("UPI", "Cash", "Bank Transfer").forEach { mode ->
-                            FilterChip(
-                                selected = selectedMode == mode,
-                                onClick = { selectedMode = mode },
-                                label = { Text(mode) }
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val amt = enteredAmount.toDoubleOrNull() ?: 0.0
-                        if (amt > 0) {
-                            viewModel.recordQuickPayment(payment.id, amt, selectedMode)
-                            showQuickPayDialog = null
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16803C))
-                ) {
-                    Text(rememberTranslation("Confirm Payment"))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showQuickPayDialog = null }) {
-                    Text(rememberTranslation("Cancel"))
-                }
-            }
-        )
-    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LedgerContent(
+fun RentDashboardContent(
     state: RentLedgerUiState.Success,
     onSearchQueryChanged: (String) -> Unit,
     onStatusFilterChanged: (String) -> Unit,
     onMonthFilterChanged: (String) -> Unit,
-    onRequestPreview: (String?) -> Unit,
+    onRequestPreview: () -> Unit,
     onPaymentClick: (Int) -> Unit,
-    onQuickPayClick: (RentPaymentEntity) -> Unit
+    onQuickPayClick: (RentPaymentEntity) -> Unit,
+    onNavigateToRecordPayment: (Int?, String?) -> Unit,
+    onNavigate: (String) -> Unit
 ) {
     var sortExpanded by remember { mutableStateOf(false) }
     var sortOrder by remember { mutableStateOf("Latest First") }
     var showFilterMenu by remember { mutableStateOf(false) }
 
-    // Sort payments based on sortOrder
     val sortedPayments = remember(state.filteredPayments, sortOrder) {
         if (sortOrder == "Latest First") {
             state.filteredPayments.sortedByDescending { it.id }
@@ -280,55 +236,71 @@ fun LedgerContent(
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Month Selector & Generate Month Action Bar
+        // 1. Month Selection Row Card (< Month Year >)
         item {
             Card(
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(12.dp),
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Month Dropdown
+                    IconButton(
+                        onClick = {
+                            val currentIndex = state.availableMonths.indexOf(state.filters.selectedMonth)
+                            if (currentIndex > 0) {
+                                onMonthFilterChanged(state.availableMonths[currentIndex - 1])
+                            } else if (state.availableMonths.isNotEmpty()) {
+                                onMonthFilterChanged(state.availableMonths.last())
+                            }
+                        },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ChevronLeft,
+                            contentDescription = rememberTranslation("Previous Month"),
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
                     var monthDropdownExpanded by remember { mutableStateOf(false) }
                     Box {
                         Surface(
                             shape = RoundedCornerShape(12.dp),
-                            color = Color(0xFFF1F5F9),
-                            border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
+                            color = Color.Transparent,
                             modifier = Modifier.clickable { monthDropdownExpanded = true }
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.CalendarMonth,
                                     contentDescription = null,
                                     tint = Color(0xFF1769D1),
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(20.dp)
                                 )
                                 Text(
                                     text = state.filters.selectedMonth,
-                                    style = MaterialTheme.typography.titleSmall.copy(
+                                    style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF1E293B)
+                                        color = MaterialTheme.colorScheme.onSurface
                                     )
                                 )
                                 Icon(
                                     imageVector = Icons.Default.ArrowDropDown,
                                     contentDescription = null,
-                                    tint = Color(0xFF64748B),
-                                    modifier = Modifier.size(18.dp)
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
@@ -343,7 +315,7 @@ fun LedgerContent(
                                         Text(
                                             text = month,
                                             fontWeight = if (month == state.filters.selectedMonth) FontWeight.Bold else FontWeight.Normal,
-                                            color = if (month == state.filters.selectedMonth) Color(0xFF1769D1) else Color(0xFF1E293B)
+                                            color = if (month == state.filters.selectedMonth) Color(0xFF1769D1) else MaterialTheme.colorScheme.onSurface
                                         )
                                     },
                                     onClick = {
@@ -355,218 +327,477 @@ fun LedgerContent(
                         }
                     }
 
-                    // Generate New Month Action Button
-                    Button(
-                        onClick = { onRequestPreview(state.filters.selectedMonth) },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF1769D1),
-                            contentColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                    IconButton(
+                        onClick = {
+                            val currentIndex = state.availableMonths.indexOf(state.filters.selectedMonth)
+                            if (currentIndex >= 0 && currentIndex < state.availableMonths.size - 1) {
+                                onMonthFilterChanged(state.availableMonths[currentIndex + 1])
+                            } else if (state.availableMonths.isNotEmpty()) {
+                                onMonthFilterChanged(state.availableMonths.first())
+                            }
+                        },
+                        modifier = Modifier.size(36.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.AutoMode,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = rememberTranslation("Generate Month"),
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                fontWeight = FontWeight.Bold
-                            )
+                            imageVector = Icons.Default.ChevronRight,
+                            contentDescription = rememberTranslation("Next Month"),
+                            tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
                 }
             }
         }
 
-        // 2. Un-generated Month Warning Banner
-        if (!state.isSelectedMonthGenerated && state.filters.selectedMonth != "All Months") {
-            item {
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFBEB)),
-                    border = BorderStroke(1.dp, Color(0xFFFDE68A)),
-                    modifier = Modifier.fillMaxWidth()
+        // 2. Rent Overview Card (Stitch faithful layout)
+        item {
+            val stats = state.monthlyStats
+            val expected = stats.totalExpectedRent
+            val collected = stats.totalPaid
+            val outstanding = stats.totalOutstanding
+            val percentage = stats.collectionPercentage
+
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    // Header: Two-line title + "View Reports >"
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Info,
-                                contentDescription = null,
-                                tint = Color(0xFFB86B00),
-                                modifier = Modifier.size(22.dp)
-                            )
+                        Column {
                             Text(
-                                text = "${rememberTranslation("Rent for")} ${state.filters.selectedMonth} ${rememberTranslation("has not been generated.")}",
+                                text = "${state.filters.selectedMonth.substringBefore(" ")} Rent",
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF92400E)
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            )
+                            Text(
+                                text = rememberTranslation("Overview"),
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                             )
                         }
-
-                        Text(
-                            text = rememberTranslation("Generate rent records for all active and incoming tenants for this calendar month. Prorated rent is automatically calculated for mid-month tenants."),
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                color = Color(0xFFB45309)
-                            )
-                        )
-
-                        Button(
-                            onClick = { onRequestPreview(state.filters.selectedMonth) },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB86B00)),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.fillMaxWidth()
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable { onNavigate(com.example.navigation.Screen.ReportsRent.route) }
                         ) {
+                            Icon(
+                                imageVector = Icons.Default.BarChart,
+                                contentDescription = null,
+                                tint = Color(0xFF1769D1),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "⚡ ${rememberTranslation("Generate")} ${state.filters.selectedMonth} ${rememberTranslation("Rent")}",
-                                fontWeight = FontWeight.Bold
+                                text = rememberTranslation("View Reports"),
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF1769D1)
+                                )
+                            )
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = Color(0xFF1769D1),
+                                modifier = Modifier.size(16.dp)
                             )
                         }
+                    }
+
+                    // Main row: Total Due left (in light blue box), Collected & Outstanding right
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Left: Total Rent Due inside a light-blue rectangular container
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = Color(0xFFEFF6FF),
+                            border = BorderStroke(1.dp, Color(0xFFDBEAFE)),
+                            modifier = Modifier
+                                .weight(1.1f)
+                                .height(104.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(12.dp),
+                                verticalArrangement = Arrangement.Center,
+                                horizontalAlignment = Alignment.Start
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(Color(0xFFDBEAFE)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Description,
+                                            contentDescription = null,
+                                            tint = Color(0xFF1769D1),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                    Text(
+                                        text = rememberTranslation("Total Rent Due"),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = Color(0xFF1E40AF),
+                                        maxLines = 1
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "₹${formatCurrency(expected)}",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    maxLines = 1
+                                )
+                            }
+                        }
+
+                        // Right: Stacked Collected & Outstanding cards
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Rent Collected
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0xFFF0FDF4),
+                                border = BorderStroke(1.dp, Color(0xFFDCFCE7)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF16803C)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("₹", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    Column {
+                                        Text(
+                                            text = rememberTranslation("Rent Collected"),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFF166534),
+                                            maxLines = 1
+                                        )
+                                        Text(
+                                            text = "₹${formatCurrency(collected)}",
+                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF16803C)
+                                            ),
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Outstanding
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0xFFFEF2F2),
+                                border = BorderStroke(1.dp, Color(0xFFFEE2E2)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFFDC2626)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(Icons.Default.PriorityHigh, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                    }
+                                    Column {
+                                        Text(
+                                            text = rememberTranslation("Outstanding"),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFF991B1B),
+                                            maxLines = 1
+                                        )
+                                        Text(
+                                            text = "₹${formatCurrency(outstanding)}",
+                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFFDC2626)
+                                            ),
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Progress bar text & indicator
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "₹${formatCurrency(collected)} of ₹${formatCurrency(expected)} collected",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "${Math.round(percentage)}%",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        LinearProgressIndicator(
+                            progress = { (percentage / 100).toFloat().coerceIn(0f, 1f) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp)),
+                            color = Color(0xFF16803C),
+                            trackColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
                     }
                 }
             }
         }
 
-        // 3. Search + Status Filters Bar
+        // 3. Three Status Cards Row (Fully Paid, Partially Paid, Unpaid / Overdue)
+        item {
+            val stats = state.monthlyStats
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Fully Paid
+                StatusSummaryCard(
+                    modifier = Modifier.weight(1f),
+                    title = rememberTranslation("Fully Paid"),
+                    countValue = stats.paidTenantsCount.toString(),
+                    icon = Icons.Default.Check,
+                    cardBg = Color(0xFFEDFCF3),
+                    cardBorder = Color(0xFFB8F5D0),
+                    iconCircleBg = Color(0xFF10B96F),
+                    titleColor = Color(0xFF087F4F)
+                )
+                // Partially Paid
+                StatusSummaryCard(
+                    modifier = Modifier.weight(1f),
+                    title = rememberTranslation("Partially Paid"),
+                    countValue = stats.partiallyPaidTenantsCount.toString(),
+                    icon = Icons.Default.Schedule,
+                    cardBg = Color(0xFFFFFBEB),
+                    cardBorder = Color(0xFFFDE047),
+                    iconCircleBg = Color(0xFFF59E0B),
+                    titleColor = Color(0xFFB45309)
+                )
+                // Unpaid / Overdue
+                StatusSummaryCard(
+                    modifier = Modifier.weight(1f),
+                    title = rememberTranslation("Unpaid /\nOverdue"),
+                    countValue = stats.pendingTenantsCount.toString(),
+                    icon = Icons.Default.Close,
+                    cardBg = Color(0xFFFFF1F2),
+                    cardBorder = Color(0xFFFECDD3),
+                    iconCircleBg = Color(0xFFF43F5E),
+                    titleColor = Color(0xFFE11D48)
+                )
+            }
+        }
+
+        // 4. Three Quick Action Buttons (+ Collect, Reminder, Reports)
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                Button(
+                    onClick = { onNavigateToRecordPayment(null, state.filters.selectedMonth) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1769D1)),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Text(rememberTranslation("Collect"), fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1, softWrap = false)
+                }
+
+                Button(
+                    onClick = { },
+                    modifier = Modifier
+                        .weight(1.1f)
+                        .height(44.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
+                ) {
+                    Icon(Icons.Default.Notifications, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Text(rememberTranslation("Reminder"), fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1, softWrap = false)
+                }
+
+                Button(
+                    onClick = { onNavigate(com.example.navigation.Screen.ReportsRent.route) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
+                ) {
+                    Icon(Icons.Default.BarChart, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Text(rememberTranslation("Reports"), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1, softWrap = false)
+                }
+            }
+        }
+
+        // 5. Tenant Rent Ledger Section Header & Search
+        item {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = rememberTranslation("Tenant Rent Ledger"),
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    )
+                    IconButton(onClick = { showFilterMenu = true }) {
+                        Icon(
+                            imageVector = Icons.Default.FilterList,
+                            contentDescription = "Filter",
+                            tint = Color(0xFF1769D1)
+                        )
+                    }
+                }
+
                 OutlinedTextField(
                     value = state.filters.searchQuery,
                     onValueChange = onSearchQueryChanged,
                     placeholder = {
                         Text(
-                            text = rememberTranslation("Search tenants by name or room..."),
-                            color = Color(0xFF94A3B8),
-                            fontSize = 14.sp
+                            text = rememberTranslation("Search tenant, room or phone..."),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 13.sp
                         )
                     },
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Default.Search,
                             contentDescription = null,
-                            tint = Color(0xFF64748B)
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    },
+                    trailingIcon = {
+                        if (state.filters.searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { onSearchQueryChanged("") }) {
+                                Icon(Icons.Default.Close, contentDescription = "Clear", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
                     },
                     singleLine = true,
                     shape = RoundedCornerShape(24.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = Color.White,
-                        unfocusedContainerColor = Color.White,
-                        disabledContainerColor = Color.White,
+                        focusedContainerColor = MaterialTheme.colorScheme.surface,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                         focusedBorderColor = Color(0xFF1769D1),
-                        unfocusedBorderColor = Color(0xFFE2E8F0)
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
                     ),
                     modifier = Modifier
-                        .weight(1f)
+                        .fillMaxWidth()
                         .height(52.dp)
                 )
-
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color.White,
-                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                    modifier = Modifier
-                        .size(52.dp)
-                        .clickable { showFilterMenu = true }
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.FilterList,
-                            contentDescription = "Filter",
-                            tint = Color(0xFF1E293B)
-                        )
-                    }
-                }
-
-                DropdownMenu(
-                    expanded = showFilterMenu,
-                    onDismissRequest = { showFilterMenu = false }
-                ) {
-                    DropdownMenuItem(
-                        text = { Text(rememberTranslation("All Statuses")) },
-                        onClick = {
-                            onStatusFilterChanged("All")
-                            showFilterMenu = false
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text(rememberTranslation("Paid Only")) },
-                        onClick = {
-                            onStatusFilterChanged("Paid")
-                            showFilterMenu = false
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text(rememberTranslation("Partially Paid")) },
-                        onClick = {
-                            onStatusFilterChanged("Partial")
-                            showFilterMenu = false
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text(rememberTranslation("Pending Only")) },
-                        onClick = {
-                            onStatusFilterChanged("Pending")
-                            showFilterMenu = false
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text(rememberTranslation("Overdue Only")) },
-                        onClick = {
-                            onStatusFilterChanged("Overdue")
-                            showFilterMenu = false
-                        }
-                    )
-                }
             }
         }
 
-        // 4. Status Filter Chips Row
+        // 6. Horizontal Status Filter Chips (All, Paid, Partial, Unpaid, Overdue)
         item {
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                val filters = listOf("All", "Paid", "Partial", "Pending", "Overdue")
+                val filters = listOf("All", "Paid", "Partial", "Unpaid", "Overdue")
                 items(filters) { filter ->
                     val isSelected = when (filter) {
                         "Partial" -> state.filters.selectedStatus.equals("Partial", true) || state.filters.selectedStatus.equals("Partially Paid", true)
+                        "Unpaid" -> state.filters.selectedStatus.equals("Pending", true) || state.filters.selectedStatus.equals("Unpaid", true)
                         else -> state.filters.selectedStatus.equals(filter, true)
                     }
+                    val count = when (filter) {
+                        "All" -> state.allPayments.size
+                        "Paid" -> state.monthlyStats.paidTenantsCount
+                        "Partial" -> state.monthlyStats.partiallyPaidTenantsCount
+                        "Unpaid" -> state.monthlyStats.pendingTenantsCount
+                        "Overdue" -> state.allPayments.count { it.status.equals("Overdue", true) }
+                        else -> 0
+                    }
                     val displayLabel = when (filter) {
-                        "Partial" -> rememberTranslation("Partially Paid")
-                        else -> rememberTranslation(filter)
+                        "All" -> "All (${state.allPayments.size})"
+                        "Paid" -> "Paid (${state.monthlyStats.paidTenantsCount})"
+                        "Partial" -> "Partial (${state.monthlyStats.partiallyPaidTenantsCount})"
+                        "Unpaid" -> "Unpaid ($count)"
+                        "Overdue" -> "Overdue ($count)"
+                        else -> "$filter ($count)"
                     }
 
                     FilterChip(
                         selected = isSelected,
-                        onClick = { onStatusFilterChanged(filter) },
-                        label = { Text(displayLabel) },
+                        onClick = { onStatusFilterChanged(if (filter == "Unpaid") "Pending" else filter) },
+                        label = { Text(displayLabel, fontWeight = FontWeight.Medium) },
                         shape = RoundedCornerShape(20.dp),
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = Color(0xFF1769D1),
                             selectedLabelColor = Color.White,
-                            containerColor = Color.White,
-                            labelColor = Color(0xFF475569)
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            labelColor = MaterialTheme.colorScheme.onSurfaceVariant
                         ),
                         border = FilterChipDefaults.filterChipBorder(
                             enabled = true,
                             selected = isSelected,
-                            borderColor = if (isSelected) Color(0xFF1769D1) else Color(0xFFE2E8F0),
+                            borderColor = if (isSelected) Color(0xFF1769D1) else MaterialTheme.colorScheme.outlineVariant,
                             selectedBorderColor = Color(0xFF1769D1)
                         )
                     )
@@ -574,148 +805,13 @@ fun LedgerContent(
             }
         }
 
-        // 5. Summary Metrics Cards (4 compact cards in horizontal row)
-        item {
-            val stats = state.monthlyStats
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // Card 1: Collected (Green)
-                SummaryCard(
-                    modifier = Modifier.weight(1f),
-                    backgroundColor = Color(0xFFECFDF5),
-                    borderColor = Color(0xFFD1FAE5),
-                    icon = Icons.Default.AttachMoney,
-                    iconTint = Color(0xFF16803C),
-                    title = "₹${stats.totalPaid}",
-                    subtitle = rememberTranslation("Collected"),
-                    caption = "${stats.paidTenantsCount} " + rememberTranslation("paid"),
-                    captionColor = Color(0xFF16803C)
-                )
-
-                // Card 2: Pending / Outstanding (Red/Amber)
-                SummaryCard(
-                    modifier = Modifier.weight(1f),
-                    backgroundColor = Color(0xFFFEF2F2),
-                    borderColor = Color(0xFFFEE2E2),
-                    icon = Icons.Default.HourglassEmpty,
-                    iconTint = Color(0xFFC62828),
-                    title = "₹${stats.totalOutstanding}",
-                    subtitle = rememberTranslation("Pending"),
-                    caption = "${stats.pendingTenantsCount + stats.partiallyPaidTenantsCount} " + rememberTranslation("dues"),
-                    captionColor = Color(0xFFC62828)
-                )
-
-                // Card 3: Total Expected (Blue)
-                SummaryCard(
-                    modifier = Modifier.weight(1f),
-                    backgroundColor = Color(0xFFEFF6FF),
-                    borderColor = Color(0xFFDBEAFE),
-                    icon = Icons.Default.PieChart,
-                    iconTint = Color(0xFF1769D1),
-                    title = "₹${stats.totalExpectedRent}",
-                    subtitle = rememberTranslation("Expected"),
-                    caption = "${stats.collectionPercentage}% " + rememberTranslation("collected"),
-                    captionColor = Color(0xFF1769D1)
-                )
-
-                // Card 4: Tenants (Purple)
-                SummaryCard(
-                    modifier = Modifier.weight(1f),
-                    backgroundColor = Color(0xFFF5F3FF),
-                    borderColor = Color(0xFFEDE9FE),
-                    icon = Icons.Default.Group,
-                    iconTint = Color(0xFF6D28D9),
-                    title = "${stats.totalTenantsCount}",
-                    subtitle = rememberTranslation("Tenants"),
-                    caption = state.filters.selectedMonth.let { if (it == "All Months") rememberTranslation("All") else it },
-                    captionColor = Color(0xFF6D28D9)
-                )
-            }
-        }
-
-        // 6. Payment Records Header
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "${rememberTranslation("Payment Records")} (${sortedPayments.size})",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1E293B)
-                    )
-                )
-
-                Box {
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = Color.White,
-                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                        modifier = Modifier.clickable { sortExpanded = true }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.SwapVert,
-                                contentDescription = null,
-                                tint = Color(0xFF64748B),
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Text(
-                                text = rememberTranslation(sortOrder),
-                                style = MaterialTheme.typography.labelMedium.copy(
-                                    fontWeight = FontWeight.Medium,
-                                    color = Color(0xFF1E293B)
-                                )
-                            )
-                            Icon(
-                                imageVector = Icons.Default.ArrowDropDown,
-                                contentDescription = null,
-                                tint = Color(0xFF64748B),
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-
-                    DropdownMenu(
-                        expanded = sortExpanded,
-                        onDismissRequest = { sortExpanded = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text(rememberTranslation("Latest First")) },
-                            onClick = {
-                                sortOrder = "Latest First"
-                                sortExpanded = false
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(rememberTranslation("Oldest First")) },
-                            onClick = {
-                                sortOrder = "Oldest First"
-                                sortExpanded = false
-                            }
-                        )
-                    }
-                }
-            }
-        }
-
-        // 7. Payment Records List or Empty State
+        // 7. Tenant Ledger Payment Cards
         if (sortedPayments.isEmpty()) {
             item {
                 Card(
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -723,288 +819,433 @@ fun LedgerContent(
                             .fillMaxWidth()
                             .padding(32.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.ReceiptLong,
                             contentDescription = null,
-                            tint = Color(0xFF94A3B8),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(48.dp)
                         )
                         Text(
-                            text = rememberTranslation("No rent payment records found"),
+                            text = rememberTranslation("No payment records found"),
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF475569)
-                            )
-                        )
-                        Text(
-                            text = rememberTranslation("Generate the month or tap + Add Payment to record rent."),
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                color = Color(0xFF94A3B8),
-                                textAlign = TextAlign.Center
-                            )
+                                color = MaterialTheme.colorScheme.onSurface
+                            ),
+                            textAlign = TextAlign.Center
                         )
                     }
                 }
             }
         } else {
             items(sortedPayments, key = { it.id }) { payment ->
-                PaymentRecordCard(
+                TenantPaymentCard(
                     payment = payment,
                     onClick = { onPaymentClick(payment.id) },
-                    onQuickPay = { onQuickPayClick(payment) }
+                    onQuickPayClick = { onQuickPayClick(payment) }
                 )
             }
         }
 
-        // Bottom spacing for FAB
+        // 8. Bottom Footer Cards (View all tenants, Follow-ups, Payment history)
         item {
-            Spacer(modifier = Modifier.height(80.dp))
-        }
-    }
-}
-
-@Composable
-fun SummaryCard(
-    modifier: Modifier = Modifier,
-    backgroundColor: Color,
-    borderColor: Color,
-    icon: ImageVector,
-    iconTint: Color,
-    title: String,
-    subtitle: String,
-    caption: String,
-    captionColor: Color
-) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(16.dp),
-        color = backgroundColor,
-        border = BorderStroke(1.dp, borderColor)
-    ) {
-        Column(
-            modifier = Modifier.padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Box(
+            Column(
                 modifier = Modifier
-                    .size(32.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color.White),
-                contentAlignment = Alignment.Center
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = iconTint,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
-                    color = Color(0xFF1E293B)
-                ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 11.sp,
-                        color = Color(0xFF64748B)
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = caption,
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 10.sp,
-                        color = captionColor
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun PaymentRecordCard(
-    payment: RentPaymentEntity,
-    onClick: () -> Unit,
-    onQuickPay: () -> Unit
-) {
-    val initial = payment.tenantName.firstOrNull()?.uppercaseChar()?.toString() ?: "T"
-    val remaining = (payment.amount - payment.amountPaid).coerceAtLeast(0.0)
-
-    val (badgeBg, badgeText, statusLabel) = when {
-        payment.status.equals("Paid", true) || payment.status.equals("Overpaid", true) ->
-            Triple(Color(0xFFECFDF5), Color(0xFF16803C), rememberTranslation("Paid"))
-        payment.status.equals("Partially Paid", true) || payment.status.equals("Partial", true) ->
-            Triple(Color(0xFFFFFBEB), Color(0xFFB86B00), rememberTranslation("Partially Paid"))
-        payment.status.equals("Overdue", true) ->
-            Triple(Color(0xFFFEF2F2), Color(0xFFC62828), rememberTranslation("Overdue"))
-        else ->
-            Triple(Color(0xFFEFF6FF), Color(0xFF1769D1), rememberTranslation("Pending"))
-    }
-
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                // View all tenants link card
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onNavigate(com.example.navigation.Screen.Tenants.route) }
                 ) {
-                    Box(
+                    Row(
                         modifier = Modifier
-                            .size(42.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFEBF3FE)),
-                        contentAlignment = Alignment.Center
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = initial,
+                            text = rememberTranslation("View all tenants"),
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF1769D1)
                             )
                         )
-                    }
-
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = payment.tenantName,
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF1E293B)
-                            )
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = Color(0xFF1769D1)
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "Room ${payment.roomNumber}",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    color = Color(0xFF64748B),
-                                    fontWeight = FontWeight.Medium
+                    }
+                }
+
+                // Follow-ups card
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFEFF6FF)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Notifications, contentDescription = null, tint = Color(0xFF1769D1), modifier = Modifier.size(20.dp))
+                            }
+                            Column {
+                                Text(
+                                    text = rememberTranslation("Follow-ups"),
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
-                            )
-                            Text("•", color = Color(0xFFCBD5E1))
-                            Text(
-                                text = payment.billingMonth,
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    color = Color(0xFF64748B)
+                                Text(
+                                    text = rememberTranslation("7 tenants need a rent follow-up"),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                            )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text(rememberTranslation("View unpaid"), color = Color(0xFF1769D1), fontWeight = FontWeight.Bold)
+                            }
+                            Button(
+                                onClick = { },
+                                modifier = Modifier.weight(1.2f),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1769D1))
+                            ) {
+                                Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(rememberTranslation("Send reminder"), fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
 
-                // Status Badge
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = badgeBg,
-                    border = BorderStroke(1.dp, badgeText.copy(alpha = 0.3f))
+                // Payment history & receipts card
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onNavigate(com.example.navigation.Screen.RentLedger.route) }
                 ) {
-                    Text(
-                        text = statusLabel,
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = badgeText
-                        ),
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                    )
-                }
-            }
-
-            HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
-
-            // Amounts Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = rememberTranslation("Expected Rent"),
-                        style = MaterialTheme.typography.labelSmall.copy(color = Color(0xFF64748B))
-                    )
-                    Text(
-                        text = "₹${payment.amount}",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF1E293B)
-                        )
-                    )
-                }
-
-                Column {
-                    Text(
-                        text = rememberTranslation("Paid"),
-                        style = MaterialTheme.typography.labelSmall.copy(color = Color(0xFF64748B))
-                    )
-                    Text(
-                        text = "₹${payment.amountPaid}",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF16803C)
-                        )
-                    )
-                }
-
-                Column {
-                    Text(
-                        text = rememberTranslation("Remaining"),
-                        style = MaterialTheme.typography.labelSmall.copy(color = Color(0xFF64748B))
-                    )
-                    Text(
-                        text = "₹$remaining",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = if (remaining > 0) Color(0xFFC62828) else Color(0xFF16803C)
-                        )
-                    )
-                }
-
-                if (!payment.status.equals("Paid", true)) {
-                    Button(
-                        onClick = onQuickPay,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1769D1)),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = rememberTranslation("Pay"),
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFEFF6FF)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Description, contentDescription = null, tint = Color(0xFF1769D1), modifier = Modifier.size(20.dp))
+                            }
+                            Text(
+                                text = rememberTranslation("Payment history & receipts"),
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun StatusSummaryCard(
+    modifier: Modifier = Modifier,
+    title: String,
+    countValue: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    cardBg: Color,
+    cardBorder: Color,
+    iconCircleBg: Color,
+    titleColor: Color
+) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = cardBg),
+        border = BorderStroke(1.dp, cardBorder),
+        modifier = modifier.height(116.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = if (!title.contains("\n")) "$title\n" else title,
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                color = titleColor,
+                textAlign = TextAlign.Center,
+                minLines = 2,
+                maxLines = 2
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(30.dp)
+                        .clip(CircleShape)
+                        .background(iconCircleBg),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(imageVector = icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                }
+                Text(
+                    text = countValue,
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF172033)
+                    ),
+                    maxLines = 1
+                )
+            }
+            Text(
+                text = rememberTranslation("tenants"),
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF64748B),
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+@Composable
+fun TenantPaymentCard(
+    payment: RentPaymentEntity,
+    onClick: () -> Unit,
+    onQuickPayClick: () -> Unit
+) {
+    val status = payment.status.lowercase()
+    val isPaid = status == "paid" || status == "overpaid"
+    val isPartial = status == "partial" || status == "partially paid"
+    val isOverdue = status == "overdue" || status == "pending" || status == "unpaid"
+
+    data class TenantCardStyle(
+        val cardBg: Color,
+        val cardBorder: Color,
+        val avatarBg: Color,
+        val primaryColor: Color,
+        val badgeBg: Color,
+        val badgeText: String,
+        val badgeColor: Color
+    )
+
+    val style = when {
+        isPaid -> TenantCardStyle(
+            cardBg = Color(0xFFEDFCF3),
+            cardBorder = Color(0xFFB8F5D0),
+            avatarBg = Color(0xFFDCFCE7),
+            primaryColor = Color(0xFF16A05D),
+            badgeBg = Color(0xFFE0F5E8),
+            badgeText = "Paid",
+            badgeColor = Color(0xFF187847)
+        )
+        isPartial -> TenantCardStyle(
+            cardBg = Color(0xFFFFFCEB),
+            cardBorder = Color(0xFFF8E88B),
+            avatarBg = Color(0xFFFFF1C2),
+            primaryColor = Color(0xFFA9570B),
+            badgeBg = Color(0xFFFFF1C2),
+            badgeText = "Partial",
+            badgeColor = Color(0xFFA9570B)
+        )
+        else -> TenantCardStyle(
+            cardBg = Color(0xFFFFF5F5),
+            cardBorder = Color(0xFFFADADA),
+            avatarBg = Color(0xFFFDE2E2),
+            primaryColor = Color(0xFFB42323),
+            badgeBg = Color(0xFFFDE2E2),
+            badgeText = if (status.contains("overdue")) "Overdue" else "Pending",
+            badgeColor = Color(0xFFB42323)
+        )
+    }
+
+    val initial = payment.tenantName.take(1).uppercase()
+
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = style.cardBg),
+        border = BorderStroke(1.dp, style.cardBorder),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // LEFT SIDE: Circular Avatar
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(style.avatarBg),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = initial,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = style.primaryColor
+                    )
+                )
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            // MIDDLE: Tenant Name, Room, Amount & Dates
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = payment.tenantName,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF172033)
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                val roomBed = listOf(
+                    "${rememberTranslation("Room")} ${payment.roomNumber}",
+                    "${rememberTranslation("Bed")} B"
+                ).joinToString(" • ")
+
+                Text(
+                    text = roomBed,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF64748B),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(modifier = Modifier.height(2.dp))
+
+                Text(
+                    text = "₹${formatCurrency(payment.amount)}",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = style.primaryColor
+                    )
+                )
+
+                val dateInfo = if (isPaid) "${rememberTranslation("Paid on")} ${payment.paymentDate ?: payment.billingMonth}" else "${rememberTranslation("Due on")} ${payment.dueDate}"
+                Text(
+                    text = dateInfo,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF94A3B8)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // RIGHT SIDE: Status Badge & Action / Arrow
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = style.badgeBg
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (isPaid) {
+                            Icon(Icons.Default.Check, contentDescription = null, tint = style.badgeColor, modifier = Modifier.size(12.dp))
+                        } else if (isOverdue) {
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = style.badgeColor, modifier = Modifier.size(12.dp))
+                        }
+                        Text(
+                            text = rememberTranslation(style.badgeText),
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = style.badgeColor
+                            )
+                        )
+                    }
+                }
+
+                if (!isPaid) {
+                    Button(
+                        onClick = onQuickPayClick,
+                        colors = ButtonDefaults.buttonColors(containerColor = style.badgeBg),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Text(
+                            text = rememberTranslation("Collect"),
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = style.badgeColor)
+                        )
+                    }
+                } else {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = Color(0xFF94A3B8)
+                    )
                 }
             }
         }
@@ -1019,263 +1260,66 @@ fun MonthGenerationPreviewSheet(
     onDismiss: () -> Unit,
     onConfirm: (String, Boolean) -> Unit
 ) {
-    val previousMonth = remember(preview.billingMonth) {
-        RentBillingEngine.getPreviousBillingMonth(preview.billingMonth)
-    }
-    var backupPreviousMonthToExcel by remember { mutableStateOf(true) }
+    var backupPrevious by remember { mutableStateOf(true) }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = Color.White,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        sheetState = sheetState
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp)
-                .navigationBarsPadding(),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Sheet Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "${rememberTranslation("Generate Rent")}: ${preview.billingMonth}",
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF1E293B)
-                        )
-                    )
-                    Text(
-                        text = "${preview.propertyName} • ${preview.daysInMonth} ${rememberTranslation("days in month")}",
-                        style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFF64748B))
-                    )
-                }
-
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Default.Close, contentDescription = "Close")
-                }
-            }
-
-            // Already Generated Info Banner
-            if (preview.isAlreadyGenerated) {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFFEFF6FF),
-                    border = BorderStroke(1.dp, Color(0xFFBFDBFE)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFF1769D1), modifier = Modifier.size(20.dp))
-                        Text(
-                            text = "${preview.billingMonth} ${rememberTranslation("rent has already been generated")} (${preview.existingRecordsCount} ${rememberTranslation("records existing")}). ${rememberTranslation("Duplicate records will not be created.")}",
-                            style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFF1E40AF))
-                        )
-                    }
-                }
-            }
-
-            // Overview Metrics Grid
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
-                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(rememberTranslation("Total Applicable Tenants"), style = MaterialTheme.typography.bodyMedium, color = Color(0xFF475569))
-                        Text("${preview.totalApplicableTenants}", fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
-                    }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(rememberTranslation("Full-Month Tenants"), style = MaterialTheme.typography.bodyMedium, color = Color(0xFF475569))
-                        Text("${preview.fullMonthTenants}", fontWeight = FontWeight.SemiBold, color = Color(0xFF16803C))
-                    }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(rememberTranslation("Prorated / Mid-Month Tenants"), style = MaterialTheme.typography.bodyMedium, color = Color(0xFF475569))
-                        Text("${preview.proratedTenants}", fontWeight = FontWeight.SemiBold, color = Color(0xFFB86B00))
-                    }
-                    if (preview.leavingTenants > 0) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(rememberTranslation("Leaving During Month"), style = MaterialTheme.typography.bodyMedium, color = Color(0xFF475569))
-                            Text("${preview.leavingTenants}", fontWeight = FontWeight.SemiBold, color = Color(0xFFC62828))
-                        }
-                    }
-                    HorizontalDivider(color = Color(0xFFE2E8F0))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(rememberTranslation("Expected Total Rent"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
-                        Text("₹${preview.expectedTotalRent}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color(0xFF1769D1))
-                    }
-                }
-            }
-
-            // Warning Notice
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = Color(0xFFFEF2F2),
-                border = BorderStroke(1.dp, Color(0xFFFECACA)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(Icons.Default.Security, contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(20.dp))
-                    Text(
-                        text = rememberTranslation("Previous month records will not be modified or deleted."),
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF991B1B)
-                        )
-                    )
-                }
-            }
-
-            // Previous Month Excel Backup Checkbox Option
-            Card(
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = if (backupPreviousMonthToExcel) Color(0xFFF0FDF4) else Color(0xFFF8FAFC)),
-                border = BorderStroke(1.dp, if (backupPreviousMonthToExcel) Color(0xFFBBF7D0) else Color(0xFFE2E8F0)),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { backupPreviousMonthToExcel = !backupPreviousMonthToExcel }
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Checkbox(
-                        checked = backupPreviousMonthToExcel,
-                        onCheckedChange = { backupPreviousMonthToExcel = it },
-                        colors = CheckboxDefaults.colors(checkedColor = Color(0xFF16803C))
-                    )
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = rememberTranslation("Backup previous month's rent data to Excel"),
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF1E293B)
-                            )
-                        )
-                        Text(
-                            text = if (backupPreviousMonthToExcel) {
-                                "$previousMonth ${rememberTranslation("will be backed up to Google Drive before")} ${preview.billingMonth} ${rememberTranslation("is generated.")}"
-                            } else {
-                                rememberTranslation("Previous month backup skipped.")
-                            },
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                color = if (backupPreviousMonthToExcel) Color(0xFF15803D) else Color(0xFF64748B)
-                            )
-                        )
-                    }
-                }
-            }
-
-            // Tenant Preview List
             Text(
-                text = "${rememberTranslation("Tenant Breakdown")} (${preview.tenantPreviews.size})",
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+                text = "${rememberTranslation("Generate Invoices")}: ${preview.billingMonth}",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+            )
+            Text(
+                text = "${rememberTranslation("Total Tenants")}: ${preview.totalApplicableTenants} (${preview.fullMonthTenants} ${rememberTranslation("Full")}, ${preview.proratedTenants} ${rememberTranslation("Prorated")})\n${rememberTranslation("Expected Revenue")}: ₹${preview.expectedTotalRent}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 220.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(preview.tenantPreviews) { tenant ->
-                    TenantPreviewRow(tenant)
-                }
+                Checkbox(
+                    checked = backupPrevious,
+                    onCheckedChange = { backupPrevious = it }
+                )
+                Text(
+                    text = rememberTranslation("Backup / Carry forward unpaid dues"),
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
 
-            // Action Buttons: Cancel and Confirm & Generate
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            Button(
+                onClick = { onConfirm(preview.billingMonth, backupPrevious) },
+                enabled = !isGenerating,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1769D1))
             ) {
-                OutlinedButton(
-                    onClick = onDismiss,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text(rememberTranslation("Cancel"), fontWeight = FontWeight.Bold)
-                }
-
-                Button(
-                    onClick = { onConfirm(preview.billingMonth, backupPreviousMonthToExcel) },
-                    enabled = !isGenerating,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1769D1)),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    if (isGenerating) {
-                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                    } else {
-                        Text(rememberTranslation("Confirm & Generate"), fontWeight = FontWeight.Bold)
-                    }
+                if (isGenerating) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(rememberTranslation("Generating..."))
+                } else {
+                    Text(rememberTranslation("Confirm & Generate Invoices"), fontWeight = FontWeight.Bold)
                 }
             }
         }
     }
 }
 
-@Composable
-fun TenantPreviewRow(tenant: TenantMonthPreview) {
-    Surface(
-        shape = RoundedCornerShape(10.dp),
-        color = if (tenant.isProrated) Color(0xFFFFFBEB) else Color(0xFFF8FAFC),
-        border = BorderStroke(1.dp, if (tenant.isProrated) Color(0xFFFDE68A) else Color(0xFFE2E8F0)),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        text = tenant.tenantName,
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
-                    )
-                    Text("• Room ${tenant.roomNumber}", style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFF64748B)))
-                }
-                Text(
-                    text = if (tenant.isProrated) "⚡ ${tenant.prorationReason}" else "Full Month (${tenant.daysInMonth} days)",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        color = if (tenant.isProrated) Color(0xFFB86B00) else Color(0xFF64748B),
-                        fontWeight = if (tenant.isProrated) FontWeight.Bold else FontWeight.Normal
-                    )
-                )
-            }
-
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = "₹${tenant.expectedRent}",
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = Color(0xFF1769D1))
-                )
-                if (tenant.alreadyExists) {
-                    Text(rememberTranslation("Existing"), style = MaterialTheme.typography.labelSmall.copy(color = Color(0xFF16803C), fontSize = 10.sp))
-                }
-            }
-        }
+fun formatCurrency(amount: Double): String {
+    return try {
+        java.text.NumberFormat.getNumberInstance(Locale("en", "IN")).format(amount)
+    } catch (e: Exception) {
+        amount.toInt().toString()
     }
 }

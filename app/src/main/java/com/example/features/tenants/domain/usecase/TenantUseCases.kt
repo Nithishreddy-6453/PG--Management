@@ -24,6 +24,16 @@ sealed class TenantValidationResult {
 }
 
 class ValidateTenantUseCase @Inject constructor() {
+    private fun normalizePhone(raw: String): String {
+        var cleaned = raw.trim().replace(" ", "").replace("-", "")
+        if (cleaned.startsWith("+91")) {
+            cleaned = cleaned.removePrefix("+91")
+        } else if (cleaned.startsWith("91") && cleaned.length > 10) {
+            cleaned = cleaned.removePrefix("91")
+        }
+        return cleaned.filter { it.isDigit() }
+    }
+
     operator fun invoke(
         name: String,
         phone: String,
@@ -38,7 +48,7 @@ class ValidateTenantUseCase @Inject constructor() {
         if (name.isBlank()) {
             return TenantValidationResult.Error("Full Name is required.")
         }
-        val cleanPhone = phone.filter { it.isDigit() }
+        val cleanPhone = normalizePhone(phone)
         if (cleanPhone.isBlank()) {
             return TenantValidationResult.Error("Mobile Number is required.")
         }
@@ -46,8 +56,8 @@ class ValidateTenantUseCase @Inject constructor() {
             return TenantValidationResult.Error("Mobile Number must be at least 10 digits.")
         }
         if (emergencyContact.isNotBlank()) {
-            val cleanEmergency = emergencyContact.filter { it.isDigit() }
-            if (cleanEmergency.length < 10) {
+            val cleanEmergency = normalizePhone(emergencyContact)
+            if (cleanEmergency.isNotBlank() && cleanEmergency.length < 10) {
                 return TenantValidationResult.Error("Emergency Contact must be at least 10 digits if provided.")
             }
         }
@@ -96,7 +106,8 @@ class AddTenantUseCase @Inject constructor(
         occupation: String = "",
         companyOrCollege: String = "",
         leavingDate: String = "",
-        notes: String = ""
+        notes: String = "",
+        targetCloudId: String = ""
     ): TenantValidationResult {
         val trimmedRoom = roomNumber.trim()
         val trimmedBed = bedId.trim()
@@ -131,31 +142,54 @@ class AddTenantUseCase @Inject constructor(
 
         // Check room capacity constraints
         val activeTenants = repository.getTenantsInRoom(trimmedRoom).filter { !it.deleted && it.roomNumber.isNotBlank() && (it.leavingDate.isBlank() || it.leavingDate > todayStr) }
-        if (activeTenants.size >= room.capacity) {
-            return TenantValidationResult.Error("Room $trimmedRoom is already at full capacity (${room.capacity} beds).")
+        val physicalBeds = repository.getBedsForRoom(trimmedRoom).filter { !it.deleted }
+        val blockedCount = physicalBeds.count { it.status == "BLOCKED" }
+        val usableCapacity = (room.capacity - blockedCount).coerceAtLeast(0)
+        if (activeTenants.size >= usableCapacity) {
+            return TenantValidationResult.Error("Room $trimmedRoom is already at full capacity.")
         }
 
-        // Ensure bed entity exists
+        // Ensure bed entity exists and belongs to room within capacity
         var bed = repository.getBed(trimmedRoom, trimmedBed)
         if (bed == null) {
-            val newBed = BedEntity(
-                roomNumber = trimmedRoom,
-                bedId = trimmedBed,
-                status = "AVAILABLE",
-                propertyId = propId
-            )
-            repository.insertBed(newBed)
-            bed = newBed
+            val existingMatch = physicalBeds.firstOrNull { com.example.core.util.BedIdentityUtil.matchesSameBed(it.bedId, trimmedBed) }
+            if (existingMatch != null) {
+                bed = existingMatch
+            } else {
+                if (physicalBeds.size >= room.capacity) {
+                    return TenantValidationResult.Error("Bed $trimmedBed does not exist in Room $trimmedRoom.")
+                }
+                val targetBedId = com.example.core.util.BedIdentityUtil.resolveAuthoritativeBedId(trimmedBed, physicalBeds)
+                val newBed = BedEntity(
+                    roomNumber = trimmedRoom,
+                    bedId = targetBedId,
+                    status = "AVAILABLE",
+                    propertyId = propId
+                )
+                repository.insertBed(newBed)
+                bed = newBed
+            }
         }
 
+        val canonicalBedId = bed.bedId
         if (bed.status == "BLOCKED") {
-            return TenantValidationResult.Error("$trimmedBed in Room $trimmedRoom is blocked / out of service.")
+            return TenantValidationResult.Error("$canonicalBedId in Room $trimmedRoom is blocked / out of service.")
+        }
+
+        // Idempotency check: If targetCloudId is provided and already exists, reuse existing tenant
+        if (targetCloudId.isNotBlank()) {
+            val existingTenantByCloudId = repository.getTenantByCloudId(targetCloudId)
+            if (existingTenantByCloudId != null && !existingTenantByCloudId.deleted) {
+                return TenantValidationResult.Success
+            }
         }
 
         // Check duplicate active assignment on bed
-        val existingActiveAssignment = repository.getActiveAssignmentForBed(trimmedRoom, trimmedBed)
-        if (existingActiveAssignment != null) {
-            return TenantValidationResult.Error("$trimmedBed in Room $trimmedRoom is already occupied.")
+        val existingActiveAssignment = repository.getActiveAssignmentForBed(trimmedRoom, canonicalBedId)
+        val activeTenantsInRoom = repository.getTenantsInRoom(trimmedRoom).filter { !it.deleted && it.roomNumber.isNotBlank() }
+        val hasActiveOnBed = activeTenantsInRoom.any { com.example.core.util.BedIdentityUtil.matchesSameBed(it.bedId, canonicalBedId) }
+        if (existingActiveAssignment != null || hasActiveOnBed || bed.status == "OCCUPIED") {
+            return TenantValidationResult.Error("$canonicalBedId in Room $trimmedRoom is already occupied.")
         }
 
         // Check for duplicate phone against active tenants
@@ -168,12 +202,13 @@ class AddTenantUseCase @Inject constructor(
         // Insert tenant
         val isKyc = kycDocType != "None" && kycDocType.isNotBlank()
         val tenant = TenantEntity(
+            cloudId = targetCloudId,
             name = trimmedName,
             phone = trimmedPhone,
             email = email.trim(),
             emergencyContact = emergencyContact.trim(),
             roomNumber = trimmedRoom,
-            bedId = trimmedBed,
+            bedId = canonicalBedId,
             monthlyRent = monthlyRent,
             securityDeposit = securityDeposit,
             moveInDate = moveInDate.ifBlank { todayStr },
@@ -197,7 +232,7 @@ class AddTenantUseCase @Inject constructor(
             assignmentId = UUID.randomUUID().toString(),
             tenantId = newId,
             roomNumber = trimmedRoom,
-            bedId = trimmedBed,
+            bedId = canonicalBedId,
             startDate = moveInDate.ifBlank { todayStr },
             endDate = if (leavingDate.isNotBlank()) leavingDate.trim() else null,
             agreedRent = monthlyRent,
@@ -299,8 +334,9 @@ class UpdateTenantUseCase @Inject constructor(
         }
         val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
 
+        var finalBedId = trimmedBed
         // If Room or Bed changed, perform checks and reconcile assignments
-        if (existingTenant.roomNumber != trimmedRoom || existingTenant.bedId != trimmedBed) {
+        if (existingTenant.roomNumber != trimmedRoom || !com.example.core.util.BedIdentityUtil.matchesSameBed(existingTenant.bedId, trimmedBed)) {
             val room = repository.getRoom(trimmedRoom)
                 ?: return TenantValidationResult.Error("Room $trimmedRoom does not exist.")
 
@@ -311,24 +347,33 @@ class UpdateTenantUseCase @Inject constructor(
                 return TenantValidationResult.Error("Target Room $trimmedRoom is at full capacity (${room.capacity} beds).")
             }
 
+            val destPhysicalBeds = repository.getBedsForRoom(trimmedRoom).filter { !it.deleted }
             var destBed = repository.getBed(trimmedRoom, trimmedBed)
             if (destBed == null) {
-                val newBed = BedEntity(
-                    roomNumber = trimmedRoom,
-                    bedId = trimmedBed,
-                    status = "AVAILABLE",
-                    propertyId = propId
-                )
-                repository.insertBed(newBed)
-                destBed = newBed
+                val existingMatch = destPhysicalBeds.firstOrNull { com.example.core.util.BedIdentityUtil.matchesSameBed(it.bedId, trimmedBed) }
+                if (existingMatch != null) {
+                    destBed = existingMatch
+                } else {
+                    val targetBedId = com.example.core.util.BedIdentityUtil.resolveAuthoritativeBedId(trimmedBed, destPhysicalBeds)
+                    val newBed = BedEntity(
+                        roomNumber = trimmedRoom,
+                        bedId = targetBedId,
+                        status = "AVAILABLE",
+                        propertyId = propId
+                    )
+                    repository.insertBed(newBed)
+                    destBed = newBed
+                }
             }
+            val canonicalDestBedId = destBed.bedId
+            finalBedId = canonicalDestBedId
             if (destBed.status == "BLOCKED") {
-                return TenantValidationResult.Error("$trimmedBed in Room $trimmedRoom is blocked / out of service.")
+                return TenantValidationResult.Error("$canonicalDestBedId in Room $trimmedRoom is blocked / out of service.")
             }
 
-            val existingBedAssign = repository.getActiveAssignmentForBed(trimmedRoom, trimmedBed)
+            val existingBedAssign = repository.getActiveAssignmentForBed(trimmedRoom, canonicalDestBedId)
             if (existingBedAssign != null && existingBedAssign.tenantId != id) {
-                return TenantValidationResult.Error("$trimmedBed in Room $trimmedRoom is already occupied.")
+                return TenantValidationResult.Error("$canonicalDestBedId in Room $trimmedRoom is already occupied.")
             }
 
             // End old assignment
@@ -336,7 +381,7 @@ class UpdateTenantUseCase @Inject constructor(
             if (currentAssignment != null) {
                 repository.updateBedAssignment(currentAssignment.copy(endDate = todayStr))
                 val oldBed = repository.getBed(currentAssignment.roomNumber, currentAssignment.bedId)
-                if (oldBed != null && (oldBed.roomNumber != trimmedRoom || oldBed.bedId != trimmedBed)) {
+                if (oldBed != null && (oldBed.roomNumber != trimmedRoom || !com.example.core.util.BedIdentityUtil.matchesSameBed(oldBed.bedId, canonicalDestBedId))) {
                     repository.updateBed(oldBed.copy(status = "AVAILABLE"))
                 }
             }
@@ -346,7 +391,7 @@ class UpdateTenantUseCase @Inject constructor(
                 assignmentId = UUID.randomUUID().toString(),
                 tenantId = id,
                 roomNumber = trimmedRoom,
-                bedId = trimmedBed,
+                bedId = canonicalDestBedId,
                 startDate = todayStr,
                 endDate = if (leavingDate.isNotBlank()) leavingDate.trim() else null,
                 agreedRent = monthlyRent,
@@ -363,7 +408,7 @@ class UpdateTenantUseCase @Inject constructor(
             email = email.trim(),
             emergencyContact = emergencyContact.trim(),
             roomNumber = trimmedRoom,
-            bedId = trimmedBed,
+            bedId = finalBedId,
             monthlyRent = monthlyRent,
             securityDeposit = securityDeposit,
             moveInDate = moveInDate,

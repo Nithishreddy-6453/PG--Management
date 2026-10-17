@@ -29,9 +29,11 @@ sealed interface RoomListUiState {
         val overallOccupancy: OverallOccupancy,
         val availableFloors: List<String>,
         val availableRoomTypes: List<String>,
+        val availableSharingTypes: List<String>,
         val searchQuery: String,
         val selectedFloor: String,
         val selectedRoomType: String,
+        val selectedSharingType: String,
         val selectedStatus: String,
         val sortBy: String,
         val totalCount: Int,
@@ -47,6 +49,7 @@ data class RoomFilterState(
     val searchQuery: String = "",
     val selectedFloor: String = "All",
     val selectedRoomType: String = "All",
+    val selectedSharingType: String = "All Sharing",
     val selectedStatus: String = "All",
     val sortBy: String = "Room Number"
 )
@@ -63,6 +66,7 @@ class RoomListViewModel @Inject constructor(
     private val _searchQuery = MutableStateFlow("")
     private val _selectedFloor = MutableStateFlow("All")
     private val _selectedRoomType = MutableStateFlow("All")
+    private val _selectedSharingType = MutableStateFlow("All Sharing")
     private val _selectedStatus = MutableStateFlow("All")
     private val _sortBy = MutableStateFlow("Room Number") // "Room Number", "Rent Asc", "Rent Desc", "Beds Available"
 
@@ -70,16 +74,18 @@ class RoomListViewModel @Inject constructor(
     val actionEvent: SharedFlow<RoomValidationResult> = _actionEvent.asSharedFlow()
 
     private val filterState: StateFlow<RoomFilterState> = combine(
-        _searchQuery,
-        _selectedFloor,
-        _selectedRoomType,
-        _selectedStatus,
-        _sortBy
-    ) { search, floor, roomType, status, sort ->
+        combine(_searchQuery, _selectedFloor, _selectedRoomType) { search, floor, roomType ->
+            Triple(search, floor, roomType)
+        },
+        combine(_selectedSharingType, _selectedStatus, _sortBy) { sharing, status, sort ->
+            Triple(sharing, status, sort)
+        }
+    ) { (search, floor, roomType), (sharing, status, sort) ->
         RoomFilterState(
             searchQuery = search,
             selectedFloor = floor,
             selectedRoomType = roomType,
+            selectedSharingType = sharing,
             selectedStatus = status,
             sortBy = sort
         )
@@ -96,17 +102,37 @@ class RoomListViewModel @Inject constructor(
         if (rooms.isEmpty()) {
             RoomListUiState.Empty
         } else {
-            // Find floors and types dynamically for filters
-            val floors = listOf("All") + rooms.map { it.floor }.distinct().sorted()
-            val types = listOf("All") + rooms.map { it.roomType }.distinct().sorted()
+            // Find floors, room types, and sharing types dynamically for filters
+            val floors = listOf("All") + rooms.map { it.floor }.filter { it.isNotBlank() }.distinct().sorted()
+            val types = listOf("All") + rooms.map { it.roomType }.filter { it.isNotBlank() }.distinct().sorted()
+
+            val defaultSharingOptions = listOf("Single Sharing", "Double Sharing", "Triple Sharing", "Four Sharing")
+            val roomSharingTypes = rooms.map { it.sharingType }.filter { it.isNotBlank() }.distinct()
+            val allDistinctSharing = (defaultSharingOptions + roomSharingTypes).distinct().sortedBy { sharing ->
+                when {
+                    sharing.equals("Single Sharing", ignoreCase = true) -> 1
+                    sharing.equals("Double Sharing", ignoreCase = true) -> 2
+                    sharing.equals("Triple Sharing", ignoreCase = true) -> 3
+                    sharing.equals("Four Sharing", ignoreCase = true) -> 4
+                    sharing.equals("Unspecified", ignoreCase = true) -> 999
+                    else -> {
+                        val num = sharing.filter { it.isDigit() }.toIntOrNull()
+                        num ?: 100
+                    }
+                }
+            }
+            val sharingTypes = listOf("All Sharing") + allDistinctSharing
             
-            // Base rooms after search + floor + roomType (for status counts)
+            // Base rooms after search + floor + roomType + sharingType (for status counts)
             var baseFiltered = searchRoomsUseCase(rooms, filters.searchQuery)
             if (filters.selectedFloor != "All" && filters.selectedFloor.isNotBlank()) {
                 baseFiltered = baseFiltered.filter { it.floor == filters.selectedFloor }
             }
             if (filters.selectedRoomType != "All" && filters.selectedRoomType.isNotBlank()) {
                 baseFiltered = baseFiltered.filter { it.roomType == filters.selectedRoomType }
+            }
+            if (filters.selectedSharingType != "All Sharing" && filters.selectedSharingType != "All" && filters.selectedSharingType.isNotBlank()) {
+                baseFiltered = baseFiltered.filter { it.sharingType.equals(filters.selectedSharingType, ignoreCase = true) }
             }
 
             val totalCount = baseFiltered.size
@@ -120,7 +146,8 @@ class RoomListViewModel @Inject constructor(
                 rooms = baseFiltered,
                 floor = "All",
                 roomType = "All",
-                occupancyStatus = filters.selectedStatus
+                occupancyStatus = filters.selectedStatus,
+                sharingType = "All Sharing"
             )
             
             // Apply sorting
@@ -139,9 +166,11 @@ class RoomListViewModel @Inject constructor(
                 overallOccupancy = overall,
                 availableFloors = floors,
                 availableRoomTypes = types,
+                availableSharingTypes = sharingTypes,
                 searchQuery = filters.searchQuery,
                 selectedFloor = filters.selectedFloor,
                 selectedRoomType = filters.selectedRoomType,
+                selectedSharingType = filters.selectedSharingType,
                 selectedStatus = filters.selectedStatus,
                 sortBy = filters.sortBy,
                 totalCount = totalCount,
@@ -169,6 +198,10 @@ class RoomListViewModel @Inject constructor(
         _selectedRoomType.value = type
     }
 
+    fun onSharingTypeChanged(sharingType: String) {
+        _selectedSharingType.value = sharingType
+    }
+
     fun onStatusChanged(status: String) {
         _selectedStatus.value = status
     }
@@ -180,6 +213,7 @@ class RoomListViewModel @Inject constructor(
     fun resetFilters() {
         _selectedFloor.value = "All"
         _selectedRoomType.value = "All"
+        _selectedSharingType.value = "All Sharing"
         _selectedStatus.value = "All"
         _sortBy.value = "Room Number"
         _searchQuery.value = ""

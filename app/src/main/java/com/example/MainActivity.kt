@@ -248,12 +248,16 @@ class MainActivity : ComponentActivity() {
                                 viewModel = viewModel,
                                 dashboardViewModel = dashboardViewModel,
                                 onNavigate = { route ->
-                                    navController.navigate(route) {
-                                        popUpTo(navController.graph.startDestinationId) {
-                                            saveState = true
+                                    if (route.startsWith("expense_details/") || route.startsWith("receipt/") || route.startsWith("edit_payment/") || route.startsWith("tenant_details/")) {
+                                        navController.navigate(route)
+                                    } else {
+                                        navController.navigate(route) {
+                                            popUpTo(navController.graph.startDestinationId) {
+                                                saveState = true
+                                            }
+                                            launchSingleTop = true
+                                            restoreState = true
                                         }
-                                        launchSingleTop = true
-                                        restoreState = true
                                     }
                                 },
                                 onLockRequested = {
@@ -297,7 +301,19 @@ class MainActivity : ComponentActivity() {
                                 onBackClick = { navController.popBackStack() },
                                 onEditRoomClick = { id -> navController.navigate(Screen.EditRoom.createRoute(id)) },
                                 onTenantClick = { id -> navController.navigate(Screen.TenantDetails.createRoute(id)) },
-                                onCollectRentClick = { navController.navigate(Screen.RentLedger.route) }
+                                onCollectRentClick = { navController.navigate(Screen.RentLedger.route) },
+                                onNavigate = { route ->
+                                    navController.navigate(route) {
+                                        popUpTo(navController.graph.startDestinationId) {
+                                            saveState = true
+                                        }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                },
+                                 onAssignTenantClick = { _, _ ->
+                                     navController.navigate(Screen.AddTenantChoice.route)
+                                 }
                             )
                         }
 
@@ -317,7 +333,7 @@ class MainActivity : ComponentActivity() {
                                     navController.navigate(Screen.TenantDetails.createRoute(id))
                                 },
                                 onAddTenantClick = {
-                                    navController.navigate(Screen.AddTenant.route)
+                                    navController.navigate(Screen.AddTenantChoice.route)
                                 },
                                 onImportExcelClick = {
                                     navController.navigate(Screen.ExcelImport.route)
@@ -334,13 +350,40 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
-                        // G.1 Add Tenant Route
-                        composable(route = Screen.AddTenant.route) {
-                            AddTenantScreen(
-                                viewModel = hiltViewModel(),
-                                onBackClick = { navController.popBackStack() }
+                        // G.0 Add Tenant Choice Route
+                        composable(route = Screen.AddTenantChoice.route) {
+                            AddTenantChoiceScreen(
+                                onBackClick = { navController.popBackStack() },
+                                onUseGoogleFormClick = { navController.navigate(Screen.PendingRegistrations.route) },
+                                onAddManuallyClick = { navController.navigate(Screen.AddTenant.createRoute()) }
                             )
                         }
+
+                        // G.1 Add Tenant Route
+                        composable(
+                            route = Screen.AddTenant.route,
+                            arguments = listOf(
+                                androidx.navigation.navArgument("registrationId") {
+                                    type = androidx.navigation.NavType.StringType
+                                    nullable = true
+                                    defaultValue = null
+                                }
+                            )
+                        ) { backStackEntry ->
+                            val regId = backStackEntry.arguments?.getString("registrationId")
+                            val viewModel: com.example.features.tenants.ui.viewmodel.AddTenantViewModel = hiltViewModel()
+                            androidx.compose.runtime.LaunchedEffect(regId) {
+                                if (!regId.isNullOrBlank()) {
+                                    viewModel.loadFromPendingRegistration(regId)
+                                }
+                            }
+                            AddTenantScreen(
+                                viewModel = viewModel,
+                                onBackClick = { navController.popBackStack() },
+                                onOpenPendingRegistrations = { navController.navigate(Screen.PendingRegistrations.route) }
+                            )
+                        }
+
 
                         // G.2 Edit Tenant Route
                         composable(route = Screen.EditTenant.route) {
@@ -376,7 +419,7 @@ class MainActivity : ComponentActivity() {
                                 viewModel = hiltViewModel(),
                                 onBackClick = { navController.popBackStack() },
                                 onRegistrationClick = { regId ->
-                                    navController.navigate(Screen.PendingRegistrationDetails.createRoute(regId))
+                                    navController.navigate(Screen.AddTenant.createRoute(regId))
                                 }
                             )
                         }
@@ -385,27 +428,22 @@ class MainActivity : ComponentActivity() {
                         composable(route = Screen.PendingRegistrationDetails.route) {
                             com.example.features.googleform.ui.PendingRegistrationDetailScreen(
                                 viewModel = hiltViewModel(),
-                                onBackClick = { navController.popBackStack() }
+                                onBackClick = { navController.popBackStack() },
+                                onNavigateToAddTenant = { regId ->
+                                    navController.navigate(Screen.AddTenant.createRoute(regId))
+                                }
                             )
                         }
 
                         // H. Rent Ledger Route
                         composable(route = Screen.Rent.route) {
-                            com.example.features.rent.ui.screens.RentDashboardScreen(
-                                onNavigateBack = { navController.popBackStack() },
-                                onNavigateToLedger = { navController.navigate(Screen.RentLedger.route) },
-                                onNavigateToRecordPayment = { navController.navigate(Screen.RecordPayment.route) }
-                            )
-                        }
-
-                        composable(route = Screen.RentLedger.route) {
                             com.example.features.rent.ui.screens.RentLedgerScreen(
                                 onNavigateBack = { navController.popBackStack() },
                                 onNavigateToPaymentDetails = { id -> 
                                     navController.navigate(Screen.EditPayment.createRoute(id)) 
                                 },
-                                onNavigateToRecordPayment = {
-                                    navController.navigate(Screen.RecordPayment.route)
+                                onNavigateToRecordPayment = { tenantId, billingMonth ->
+                                    navController.navigate(Screen.RecordPayment.createRoute(tenantId, billingMonth))
                                 },
                                 onNavigate = { route ->
                                     navController.navigate(route) {
@@ -419,7 +457,34 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
-                        composable(route = Screen.RecordPayment.route) {
+                        composable(route = Screen.RentLedger.route) {
+                            com.example.features.rent.ui.screens.RentLedgerScreen(
+                                onNavigateBack = { navController.popBackStack() },
+                                onNavigateToPaymentDetails = { id -> 
+                                    navController.navigate(Screen.EditPayment.createRoute(id)) 
+                                },
+                                onNavigateToRecordPayment = { tenantId, billingMonth ->
+                                    navController.navigate(Screen.RecordPayment.createRoute(tenantId, billingMonth))
+                                },
+                                onNavigate = { route ->
+                                    navController.navigate(route) {
+                                        popUpTo(navController.graph.startDestinationId) {
+                                            saveState = true
+                                        }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                }
+                            )
+                        }
+
+                        composable(
+                            route = Screen.RecordPayment.route,
+                            arguments = listOf(
+                                androidx.navigation.navArgument("tenantId") { type = androidx.navigation.NavType.IntType; defaultValue = 0 },
+                                androidx.navigation.navArgument("billingMonth") { type = androidx.navigation.NavType.StringType; nullable = true; defaultValue = "" }
+                            )
+                        ) {
                             com.example.features.rent.ui.screens.PaymentScreen(
                                 onNavigateBack = { navController.popBackStack() }
                             )
@@ -492,7 +557,13 @@ class MainActivity : ComponentActivity() {
                         }
 
                         composable(route = Screen.ReportsRevenue.route) { entry ->
-                            val parentEntry = remember(entry) { navController.getBackStackEntry(Screen.Reports.route) }
+                            val parentEntry = remember(entry) {
+                                try {
+                                    navController.getBackStackEntry(Screen.Reports.route)
+                                } catch (_: Exception) {
+                                    entry
+                                }
+                            }
                             RevenueReportScreen(
                                 viewModel = hiltViewModel(parentEntry),
                                 onBackClick = { navController.popBackStack() }
@@ -500,7 +571,13 @@ class MainActivity : ComponentActivity() {
                         }
 
                         composable(route = Screen.ReportsExpense.route) { entry ->
-                            val parentEntry = remember(entry) { navController.getBackStackEntry(Screen.Reports.route) }
+                            val parentEntry = remember(entry) {
+                                try {
+                                    navController.getBackStackEntry(Screen.Reports.route)
+                                } catch (_: Exception) {
+                                    entry
+                                }
+                            }
                             ExpenseReportScreen(
                                 viewModel = hiltViewModel(parentEntry),
                                 onBackClick = { navController.popBackStack() }
@@ -508,7 +585,13 @@ class MainActivity : ComponentActivity() {
                         }
 
                         composable(route = Screen.ReportsRent.route) { entry ->
-                            val parentEntry = remember(entry) { navController.getBackStackEntry(Screen.Reports.route) }
+                            val parentEntry = remember(entry) {
+                                try {
+                                    navController.getBackStackEntry(Screen.Reports.route)
+                                } catch (_: Exception) {
+                                    entry
+                                }
+                            }
                             RentAnalyticsScreen(
                                 viewModel = hiltViewModel(parentEntry),
                                 onBackClick = { navController.popBackStack() }
@@ -516,7 +599,13 @@ class MainActivity : ComponentActivity() {
                         }
 
                         composable(route = Screen.ReportsOccupancy.route) { entry ->
-                            val parentEntry = remember(entry) { navController.getBackStackEntry(Screen.Reports.route) }
+                            val parentEntry = remember(entry) {
+                                try {
+                                    navController.getBackStackEntry(Screen.Reports.route)
+                                } catch (_: Exception) {
+                                    entry
+                                }
+                            }
                             OccupancyReportScreen(
                                 viewModel = hiltViewModel(parentEntry),
                                 onBackClick = { navController.popBackStack() }

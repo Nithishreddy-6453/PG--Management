@@ -94,8 +94,15 @@ class PgRepository @Inject constructor(
 
     suspend fun insertTenant(tenant: TenantEntity): Int {
         val currentPropId = currentPropertyManager.getCurrentPropertyId()
+        val cloudId = if (tenant.cloudId.isNotBlank()) tenant.cloudId else "tenant_${java.util.UUID.randomUUID()}"
+        val targetPropId = when {
+            tenant.propertyId.isNotBlank() && tenant.propertyId != "property_default" -> tenant.propertyId
+            currentPropId.isNotBlank() && currentPropId != "property_default" -> currentPropId
+            else -> currentPropertyManager.restoreActiveProperty().takeIf { it.isNotBlank() && it != "property_default" } ?: currentPropId
+        }
         val updated = tenant.copy(
-            propertyId = if (tenant.propertyId.isNotBlank() && tenant.propertyId != "property_default") tenant.propertyId else currentPropId,
+            cloudId = cloudId,
+            propertyId = targetPropId,
             updatedAt = System.currentTimeMillis(),
             syncStatus = "PENDING_UPLOAD"
         )
@@ -106,8 +113,21 @@ class PgRepository @Inject constructor(
 
     suspend fun updateTenant(tenant: TenantEntity) {
         val currentPropId = currentPropertyManager.getCurrentPropertyId()
+        val existing = if (tenant.id > 0) tenantDao.getTenantByIdIncludingDeleted(tenant.id) else null
+        val cloudId = when {
+            tenant.cloudId.isNotBlank() -> tenant.cloudId
+            existing?.cloudId?.isNotBlank() == true -> existing.cloudId
+            else -> "tenant_${java.util.UUID.randomUUID()}"
+        }
+        val targetPropId = when {
+            tenant.propertyId.isNotBlank() && tenant.propertyId != "property_default" -> tenant.propertyId
+            existing != null && existing.propertyId.isNotBlank() && existing.propertyId != "property_default" -> existing.propertyId
+            currentPropId.isNotBlank() && currentPropId != "property_default" -> currentPropId
+            else -> currentPropertyManager.restoreActiveProperty().takeIf { it.isNotBlank() && it != "property_default" } ?: currentPropId
+        }
         val updated = tenant.copy(
-            propertyId = if (tenant.propertyId.isNotBlank() && tenant.propertyId != "property_default") tenant.propertyId else currentPropId,
+            cloudId = cloudId,
+            propertyId = targetPropId,
             updatedAt = System.currentTimeMillis(),
             syncStatus = "PENDING_UPLOAD"
         )
@@ -216,13 +236,16 @@ class PgRepository @Inject constructor(
 
     suspend fun insertExpense(expense: ExpenseEntity) {
         val currentPropId = currentPropertyManager.getCurrentPropertyId()
+        val cloudId = if (expense.cloudId.isNotBlank()) expense.cloudId else "expense_${java.util.UUID.randomUUID()}"
         val updated = expense.copy(
+            cloudId = cloudId,
             propertyId = currentPropId,
             updatedAt = System.currentTimeMillis(),
             syncStatus = "PENDING_UPLOAD"
         )
-        expenseDao.insertExpense(updated)
-        syncCoordinator?.enqueueOperation("EXPENSE", updated.id.toString(), "CREATE")
+        val insertedId = expenseDao.insertExpense(updated)
+        val finalId = if (updated.id > 0) updated.id else insertedId.toInt()
+        syncCoordinator?.enqueueOperation("EXPENSE", finalId.toString(), "CREATE")
     }
 
     suspend fun deleteExpense(id: Int) {

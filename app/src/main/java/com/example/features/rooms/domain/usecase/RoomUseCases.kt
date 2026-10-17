@@ -155,8 +155,10 @@ class SearchRoomsUseCase @Inject constructor() {
         val term = query.lowercase().trim()
         return rooms.filter {
             it.roomNumber.lowercase().contains(term) ||
+            it.activeTenants.any { tenant -> tenant.name.lowercase().contains(term) } ||
             it.floor.lowercase().contains(term) ||
             it.roomType.lowercase().contains(term) ||
+            it.sharingType.lowercase().contains(term) ||
             it.notes.lowercase().contains(term)
         }
     }
@@ -167,7 +169,8 @@ class FilterRoomsUseCase @Inject constructor() {
         rooms: List<RoomSummary>,
         floor: String?,
         roomType: String?,
-        occupancyStatus: String?
+        occupancyStatus: String?,
+        sharingType: String? = "All Sharing"
     ): List<RoomSummary> {
         var result = rooms
         if (floor != null && floor != "All" && floor.isNotBlank()) {
@@ -175,6 +178,9 @@ class FilterRoomsUseCase @Inject constructor() {
         }
         if (roomType != null && roomType != "All" && roomType.isNotBlank()) {
             result = result.filter { it.roomType == roomType }
+        }
+        if (sharingType != null && sharingType != "All Sharing" && sharingType != "All" && sharingType.isNotBlank()) {
+            result = result.filter { it.sharingType.equals(sharingType, ignoreCase = true) }
         }
         if (occupancyStatus != null && occupancyStatus != "All" && occupancyStatus.isNotBlank()) {
             result = result.filter { room ->
@@ -195,6 +201,7 @@ data class OverallOccupancy(
     val totalBeds: Int = 0,
     val occupiedBeds: Int = 0,
     val availableBeds: Int = 0,
+    val blockedBeds: Int = 0,
     val occupancyPercentage: Double = 0.0,
     val vacancyPercentage: Double = 0.0
 )
@@ -203,9 +210,10 @@ class OccupancyCalculationUseCase @Inject constructor() {
     operator fun invoke(rooms: List<RoomSummary>): OverallOccupancy {
         val total = rooms.sumOf { it.totalBeds }
         val occupied = rooms.sumOf { it.occupiedBeds }
-        val available = (total - occupied).coerceAtLeast(0)
+        val blocked = rooms.sumOf { it.blockedBeds }
+        val available = rooms.sumOf { it.availableBeds }
         val occPercent = if (total > 0) (occupied.toDouble() / total) * 100.0 else 0.0
         val vacPercent = if (total > 0) (available.toDouble() / total) * 100.0 else 0.0
-        return OverallOccupancy(total, occupied, available, occPercent, vacPercent)
+        return OverallOccupancy(total, occupied, available, blocked, occPercent, vacPercent)
     }
 }

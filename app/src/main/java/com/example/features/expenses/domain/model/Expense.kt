@@ -43,7 +43,8 @@ data class Expense(
     val recurringStartDate: String? = null,
     val recurringEndDate: String? = null,
     val recurringExpenseId: String? = null,
-    val payments: List<ExpensePayment> = emptyList()
+    val payments: List<ExpensePayment> = emptyList(),
+    val receiptAttachment: ExpenseAttachment? = null
 ) {
     val isFullyPaid: Boolean
         get() = status.equals("Paid", ignoreCase = true) || (remainingAmount <= 0.001 && paidAmount > 0)
@@ -58,7 +59,7 @@ data class Expense(
         private const val META_TAG = "__EXPENSE_META__:"
 
         /**
-         * Packs additional financial and recurring metadata into the entity's notes field
+         * Packs additional financial, recurring and receipt metadata into the entity's notes field
          * in a clean, robust, and backward-compatible format.
          */
         fun packNotesWithMetadata(
@@ -72,7 +73,8 @@ data class Expense(
             recurringStartDate: String?,
             recurringEndDate: String?,
             recurringExpenseId: String?,
-            payments: List<ExpensePayment>
+            payments: List<ExpensePayment>,
+            receiptAttachment: ExpenseAttachment? = null
         ): String {
             try {
                 val json = JSONObject()
@@ -98,6 +100,25 @@ data class Expense(
                     paymentsArray.put(pJson)
                 }
                 json.put("payments", paymentsArray)
+
+                receiptAttachment?.let { att ->
+                    val attJson = JSONObject()
+                    attJson.put("id", att.id)
+                    attJson.put("expenseCloudId", att.expenseCloudId)
+                    attJson.put("propertyId", att.propertyId)
+                    attJson.put("ownerId", att.ownerId)
+                    attJson.put("driveFileId", att.driveFileId)
+                    attJson.put("fileName", att.fileName)
+                    attJson.put("mimeType", att.mimeType)
+                    attJson.put("fileSize", att.fileSize)
+                    attJson.put("uploadStatus", att.uploadStatus)
+                    attJson.put("localFilePath", att.localFilePath)
+                    attJson.put("createdAt", att.createdAt)
+                    attJson.put("source", att.source)
+                    if (att.lastError != null) attJson.put("lastError", att.lastError)
+                    json.put("receiptAttachment", attJson)
+                }
+
                 json.put("userNotes", userNotes)
 
                 return META_TAG + json.toString()
@@ -141,7 +162,8 @@ data class Expense(
                     recurringStartDate = null,
                     recurringEndDate = null,
                     recurringExpenseId = null,
-                    payments = legacyPayment
+                    payments = legacyPayment,
+                    receiptAttachment = null
                 )
             }
 
@@ -189,6 +211,25 @@ data class Expense(
                     )
                 }
 
+                val attJson = json.optJSONObject("receiptAttachment")
+                val receiptAttachment = if (attJson != null) {
+                    ExpenseAttachment(
+                        id = attJson.optString("id", UUID.randomUUID().toString()),
+                        expenseCloudId = attJson.optString("expenseCloudId", ""),
+                        propertyId = attJson.optString("propertyId", ""),
+                        ownerId = attJson.optString("ownerId", ""),
+                        driveFileId = attJson.optString("driveFileId", ""),
+                        fileName = attJson.optString("fileName", ""),
+                        mimeType = attJson.optString("mimeType", "application/pdf"),
+                        fileSize = attJson.optLong("fileSize", 0L),
+                        uploadStatus = attJson.optString("uploadStatus", "PENDING_UPLOAD"),
+                        localFilePath = attJson.optString("localFilePath", ""),
+                        createdAt = attJson.optLong("createdAt", System.currentTimeMillis()),
+                        source = attJson.optString("source", "UPLOAD"),
+                        lastError = if (attJson.has("lastError")) attJson.optString("lastError") else null
+                    )
+                } else null
+
                 ParsedExpenseMetadata(
                     userNotes = userNotes,
                     status = status,
@@ -200,7 +241,8 @@ data class Expense(
                     recurringStartDate = recurringStartDate,
                     recurringEndDate = recurringEndDate,
                     recurringExpenseId = recurringExpenseId,
-                    payments = paymentsList
+                    payments = paymentsList,
+                    receiptAttachment = receiptAttachment
                 )
             } catch (_: Exception) {
                 ParsedExpenseMetadata(
@@ -214,7 +256,8 @@ data class Expense(
                     recurringStartDate = null,
                     recurringEndDate = null,
                     recurringExpenseId = null,
-                    payments = emptyList()
+                    payments = emptyList(),
+                    receiptAttachment = null
                 )
             }
         }
@@ -232,5 +275,6 @@ data class ParsedExpenseMetadata(
     val recurringStartDate: String?,
     val recurringEndDate: String?,
     val recurringExpenseId: String?,
-    val payments: List<ExpensePayment>
+    val payments: List<ExpensePayment>,
+    val receiptAttachment: ExpenseAttachment? = null
 )

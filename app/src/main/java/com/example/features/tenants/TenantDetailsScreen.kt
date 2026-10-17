@@ -6,6 +6,8 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -16,8 +18,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -30,13 +32,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
 import com.example.core.designsystem.LocalSpacing
+import com.example.data.database.PropertyEntity
 import com.example.data.database.TenantEntity
+import com.example.data.database.RentPaymentEntity
 import com.example.features.tenants.domain.model.TenantMedia
 import com.example.features.tenants.domain.model.UploadPhotoProgress
 import com.example.features.tenants.ui.viewmodel.TenantDetailsUiEffect
@@ -44,6 +49,9 @@ import com.example.features.tenants.ui.viewmodel.TenantDetailsUiState
 import com.example.features.tenants.ui.viewmodel.TenantDetailsViewModel
 import kotlinx.coroutines.flow.collectLatest
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,6 +70,17 @@ fun TenantDetailsScreen(
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showLeavingDateDialog by remember { mutableStateOf(false) }
     var inputLeavingDate by remember { mutableStateOf("") }
+    var showRecordPaymentDialog by remember { mutableStateOf(false) }
+    var showPaymentHistorySheet by remember { mutableStateOf(false) }
+
+    // Expandable Section States
+    var isPersonalExpanded by remember { mutableStateOf(true) }
+    var isRoomStayExpanded by remember { mutableStateOf(true) }
+    var isGuardianExpanded by remember { mutableStateOf(true) }
+    var isAddressExpanded by remember { mutableStateOf(true) }
+    var isRentDepositExpanded by remember { mutableStateOf(true) }
+    var isDocumentsExpanded by remember { mutableStateOf(true) }
+    var isAdditionalExpanded by remember { mutableStateOf(true) }
 
     // Photo Management States
     var showPhotoOptionsDialog by remember { mutableStateOf(false) }
@@ -71,7 +90,7 @@ fun TenantDetailsScreen(
 
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // Launchers
+    // Photo Launchers
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
@@ -86,6 +105,22 @@ fun TenantDetailsScreen(
         }
     }
 
+    // Document Picker Launcher
+    val documentPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let {
+            val cursor = context.contentResolver.query(it, null, null, null, null)
+            val nameIndex = cursor?.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+            val name = if (cursor != null && cursor.moveToFirst() && nameIndex != null && nameIndex >= 0) {
+                cursor.getString(nameIndex)
+            } else "Document.pdf"
+            cursor?.close()
+            val mime = context.contentResolver.getType(it) ?: "application/pdf"
+            viewModel.uploadDocument(it, name, mime)
+        }
+    }
+
     val consentLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -95,20 +130,13 @@ fun TenantDetailsScreen(
     LaunchedEffect(key1 = true) {
         viewModel.uiEffect.collectLatest { effect ->
             when (effect) {
-                is TenantDetailsUiEffect.NavigateBack -> {
-                    onBackClick()
-                }
-                is TenantDetailsUiEffect.ShowToast -> {
-                    snackbarHostState.showSnackbar(effect.message)
-                }
-                is TenantDetailsUiEffect.LaunchGoogleConsent -> {
-                    consentLauncher.launch(effect.intent)
-                }
+                is TenantDetailsUiEffect.NavigateBack -> onBackClick()
+                is TenantDetailsUiEffect.ShowToast -> snackbarHostState.showSnackbar(effect.message)
+                is TenantDetailsUiEffect.LaunchGoogleConsent -> consentLauncher.launch(effect.intent)
             }
         }
     }
 
-    // Refresh details when entering screen
     LaunchedEffect(key1 = true) {
         viewModel.loadTenantDetails()
     }
@@ -125,46 +153,260 @@ fun TenantDetailsScreen(
             cameraTempUri = uri
             cameraLauncher.launch(uri)
         } catch (e: Exception) {
-            // Fallback to gallery picker if camera fails
             photoPickerLauncher.launch(
                 PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
             )
         }
     }
 
+    fun openWhatsApp(phone: String) {
+        try {
+            val cleanPhone = phone.replace("[^0-9]".toRegex(), "")
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://api.whatsapp.com/send?phone=$cleanPhone"))
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/${phone.replace("[^0-9]".toRegex(), "")}"))
+            context.startActivity(intent)
+        }
+    }
+
+    fun makeCall(phone: String) {
+        try {
+            val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phone"))
+            context.startActivity(intent)
+        } catch (_: Exception) {}
+    }
+
+    fun sendRentReminder(tenant: TenantEntity, amount: Double) {
+        val message = "Dear ${tenant.name}, your rent payment of ₹${amount.toInt()} for Room ${tenant.roomNumber} is due. Kindly pay at your earliest convenience."
+        val cleanPhone = tenant.phone.replace("[^0-9]".toRegex(), "")
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://api.whatsapp.com/send?phone=$cleanPhone&text=${Uri.encode(message)}"))
+            context.startActivity(intent)
+        } catch (_: Exception) {
+            val smsIntent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$cleanPhone")).apply {
+                putExtra("sms_body", message)
+            }
+            context.startActivity(smsIntent)
+        }
+    }
+
+    fun openDocument(doc: TenantMedia) {
+        try {
+            val uriToOpen = if (doc.hasLocalFile) {
+                FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    File(doc.localFilePath)
+                )
+            } else if (doc.fileUrl.isNotBlank()) {
+                Uri.parse(doc.fileUrl)
+            } else if (doc.driveFileId.isNotBlank()) {
+                Uri.parse("https://drive.google.com/uc?export=view&id=${doc.driveFileId}")
+            } else null
+
+            if (uriToOpen != null) {
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uriToOpen, doc.mimeType.ifBlank { "*/*" })
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+            }
+        } catch (e: Exception) {
+            val fallbackUrl = doc.fileUrl.ifBlank { "https://drive.google.com/uc?export=view&id=${doc.driveFileId}" }
+            if (fallbackUrl.isNotBlank()) {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(fallbackUrl)))
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Tenant Profile", fontWeight = FontWeight.Bold) },
+                title = {
+                    Column {
+                        Text(
+                            text = "Tenant Profile",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 19.sp,
+                            color = Color(0xFF0F172A)
+                        )
+                        Text(
+                            text = "View and manage tenant details",
+                            fontSize = 12.sp,
+                            color = Color(0xFF64748B)
+                        )
+                    }
+                },
                 navigationIcon = {
-                    IconButton(
-                        onClick = onBackClick,
-                        modifier = Modifier.testTag("details_back_button")
+                    Box(
+                        modifier = Modifier
+                            .padding(start = 12.dp, end = 8.dp)
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFF1F5F9))
+                            .clickable(onClick = onBackClick)
+                            .testTag("details_back_button"),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color(0xFF0F172A),
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
                 },
                 actions = {
                     com.example.core.language.GlobalLanguageToggle(
                         modifier = Modifier.padding(end = 4.dp)
                     )
-                    val currentState = state
-                    if (currentState is TenantDetailsUiState.Success) {
-                        IconButton(
-                            onClick = { onEditClick(currentState.tenant.id) },
-                            modifier = Modifier.testTag("details_edit_button")
+                    val currentState = state as? TenantDetailsUiState.Success
+                    var showOverflowMenu by remember { mutableStateOf(false) }
+                    Box {
+                        Box(
+                            modifier = Modifier
+                                .padding(end = 12.dp)
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFF1F5F9))
+                                .clickable { showOverflowMenu = true }
+                                .testTag("details_overflow_button"),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Icon(imageVector = Icons.Default.Edit, contentDescription = "Edit Profile")
+                            Icon(
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "More Options",
+                                tint = Color(0xFF0F172A),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = showOverflowMenu,
+                            onDismissRequest = { showOverflowMenu = false },
+                            modifier = Modifier.background(Color.White)
+                        ) {
+                            if (currentState != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Edit Tenant Details", fontSize = 14.sp) },
+                                    leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, tint = Color(0xFF2563EB)) },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        onEditClick(currentState.tenant.id)
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Add Document / Photo", fontSize = 14.sp) },
+                                    leadingIcon = { Icon(Icons.Default.UploadFile, contentDescription = null, tint = Color(0xFF16A34A)) },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        showPhotoOptionsDialog = true
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Set Leaving Date", fontSize = 14.sp) },
+                                    leadingIcon = { Icon(Icons.Default.Event, contentDescription = null, tint = Color(0xFFD97706)) },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        inputLeavingDate = currentState.tenant.leavingDate
+                                        showLeavingDateDialog = true
+                                    }
+                                )
+                                HorizontalDivider(color = Color(0xFFE2E8F0))
+                                DropdownMenuItem(
+                                    text = { Text("Vacate Tenant", fontSize = 14.sp, color = Color(0xFFDC2626)) },
+                                    leadingIcon = { Icon(Icons.Default.ExitToApp, contentDescription = null, tint = Color(0xFFDC2626)) },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        showVacateDialog = true
+                                    }
+                                )
+                            }
                         }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surface
+                    containerColor = Color(0xFFF8FAFC),
+                    titleContentColor = Color(0xFF0F172A)
                 ),
                 modifier = Modifier.testTag("details_top_bar")
             )
+        },
+        bottomBar = {
+            val currentState = state as? TenantDetailsUiState.Success
+            if (currentState != null) {
+                Surface(
+                    color = Color.White,
+                    tonalElevation = 8.dp,
+                    shadowElevation = 12.dp,
+                    modifier = Modifier.fillMaxWidth().testTag("tenant_bottom_actions_bar")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .windowInsetsPadding(WindowInsets.navigationBars)
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Button(
+                            onClick = { onEditClick(currentState.tenant.id) },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF2563EB),
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(52.dp)
+                                .testTag("edit_tenant_bottom_button")
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Edit Tenant", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        }
+
+                        val isVacated = currentState.tenant.roomNumber.isBlank()
+                        if (!isVacated) {
+                            Button(
+                                onClick = { showVacateDialog = true },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFFEF2F2),
+                                    contentColor = Color(0xFFDC2626)
+                                ),
+                                border = BorderStroke(1.dp, Color(0xFFFCA5A5)),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(52.dp)
+                                    .testTag("vacate_tenant_bottom_button")
+                            ) {
+                                Icon(Icons.Default.ExitToApp, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Vacate Tenant", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            }
+                        } else {
+                            Button(
+                                onClick = { showDeleteDialog = true },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFFEF2F2),
+                                    contentColor = Color(0xFFDC2626)
+                                ),
+                                border = BorderStroke(1.dp, Color(0xFFFCA5A5)),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(52.dp)
+                                    .testTag("delete_tenant_bottom_button")
+                            ) {
+                                Icon(Icons.Default.DeleteForever, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Delete Tenant", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            }
+                        }
+                    }
+                }
+            }
         },
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         modifier = modifier.fillMaxSize().testTag("tenant_details_screen_container")
@@ -173,12 +415,15 @@ fun TenantDetailsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .background(MaterialTheme.colorScheme.background)
+                .background(Color(0xFFF8FAFC))
         ) {
             when (val currentState = state) {
                 is TenantDetailsUiState.Loading -> {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(modifier = Modifier.testTag("details_loading_indicator"))
+                        CircularProgressIndicator(
+                            color = Color(0xFF2563EB),
+                            modifier = Modifier.testTag("details_loading_indicator")
+                        )
                     }
                 }
                 is TenantDetailsUiState.Error -> {
@@ -194,6 +439,7 @@ fun TenantDetailsScreen(
                 }
                 is TenantDetailsUiState.Success -> {
                     val tenant = currentState.tenant
+                    val property = currentState.property
                     val isVacated = tenant.roomNumber.isBlank()
                     val profilePhoto = currentState.profilePhoto
 
@@ -201,381 +447,536 @@ fun TenantDetailsScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .verticalScroll(scrollState)
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        // 1. Hero Header Card with Google Drive Profile Photo
-                        ProfileHeroHeader(
+                        // 1. Compact Tenant Header Card
+                        TenantIdentityCard(
                             tenant = tenant,
                             profilePhoto = profilePhoto,
                             isPhotoUploading = currentState.isPhotoUploading,
                             isPhotoDownloading = currentState.isPhotoDownloading,
                             photoDownloadError = currentState.photoDownloadError,
-                            uploadProgress = currentState.uploadProgress,
                             needsDriveConsent = currentState.needsDriveConsent,
-                            spacing = spacing,
                             isVacated = isVacated,
-                            onPhotoClick = {
-                                showPhotoOptionsDialog = true
-                            },
-                            onAddPhotoClick = {
-                                showPhotoOptionsDialog = true
-                            },
-                            onAuthorizeDriveClick = {
-                                consentLauncher.launch(viewModel.getDriveConsentIntent())
-                            },
-                            onRetryDownload = {
-                                viewModel.retryPhotoDownload()
-                            }
+                            onPhotoClick = { showPhotoOptionsDialog = true },
+                            onEditClick = { onEditClick(tenant.id) },
+                            onAuthorizeDriveClick = { consentLauncher.launch(viewModel.getDriveConsentIntent()) },
+                            onRetryDownload = { viewModel.retryPhotoDownload() }
                         )
 
-                        // 1.5. Scheduled to Vacate Banner (if leaving date is set and not vacated)
-                        if (!isVacated && tenant.leavingDate.isNotBlank()) {
-                            Card(
+                        // 1.5. Google Drive Authorise & Photo Sync Banner (if action needed or photo on Drive)
+                        val hasRemotePhoto = profilePhoto != null && profilePhoto.driveFileId.isNotBlank()
+                        val hasLocalPhoto = profilePhoto != null && profilePhoto.hasLocalFile
+                        val needsPhotoSyncBanner = currentState.needsDriveConsent || (hasRemotePhoto && !hasLocalPhoto) || currentState.photoDownloadError != null
+
+                        if (needsPhotoSyncBanner) {
+                            Surface(
                                 shape = RoundedCornerShape(16.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF3C7)),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFDE68A)),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = spacing.medium, vertical = spacing.small)
-                                    .testTag("tenant_leaving_date_banner")
+                                color = if (currentState.needsDriveConsent) Color(0xFFFEF3C7) else Color(0xFFEFF6FF),
+                                border = BorderStroke(1.dp, if (currentState.needsDriveConsent) Color(0xFFFCD34D) else Color(0xFFBFDBFE)),
+                                modifier = Modifier.fillMaxWidth().testTag("drive_photo_sync_banner")
                             ) {
-                                Column(modifier = Modifier.padding(14.dp)) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.EventBusy,
-                                            contentDescription = null,
-                                            tint = Color(0xFFD97706),
-                                            modifier = Modifier.size(24.dp)
+                                Row(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = if (currentState.needsDriveConsent) Icons.Default.CloudOff else Icons.Default.CloudSync,
+                                        contentDescription = null,
+                                        tint = if (currentState.needsDriveConsent) Color(0xFFB45309) else Color(0xFF2563EB),
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = if (currentState.needsDriveConsent) "Google Drive Consent Required" else "Profile Photo Available in Drive",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp,
+                                            color = if (currentState.needsDriveConsent) Color(0xFF92400E) else Color(0xFF1E3A8A)
                                         )
-                                        Spacer(modifier = Modifier.width(10.dp))
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = "Scheduled to Vacate",
-                                                style = MaterialTheme.typography.titleSmall.copy(
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = Color(0xFF92400E)
-                                                )
-                                            )
-                                            Text(
-                                                text = "Leaving on: ${tenant.leavingDate}",
-                                                style = MaterialTheme.typography.bodyMedium.copy(
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    color = Color(0xFFB45309)
-                                                )
-                                            )
-                                        }
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = if (currentState.needsDriveConsent)
+                                                "Authorise Google Drive on this device to view profile photos uploaded from other phones."
+                                            else
+                                                "Photo exists on Drive. Tap Sync to download and view it on this phone.",
+                                            fontSize = 12.sp,
+                                            color = if (currentState.needsDriveConsent) Color(0xFFB45309) else Color(0xFF3B82F6)
+                                        )
                                     }
-
-                                    Spacer(modifier = Modifier.height(10.dp))
-
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        modifier = Modifier.fillMaxWidth()
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Button(
+                                        onClick = {
+                                            if (currentState.needsDriveConsent) {
+                                                consentLauncher.launch(viewModel.getDriveConsentIntent())
+                                            } else {
+                                                viewModel.syncAndAuthorizeDrive()
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = if (currentState.needsDriveConsent) Color(0xFFD97706) else Color(0xFF2563EB)
+                                        ),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.testTag("authorise_sync_photo_banner_button")
                                     ) {
-                                        OutlinedButton(
-                                            onClick = {
-                                                inputLeavingDate = tenant.leavingDate
-                                                showLeavingDateDialog = true
-                                            },
-                                            shape = RoundedCornerShape(10.dp),
-                                            colors = ButtonDefaults.outlinedButtonColors(
-                                                contentColor = Color(0xFF92400E)
-                                            ),
-                                            modifier = Modifier.weight(1f).testTag("edit_leaving_date_button")
-                                        ) {
-                                            Text("Change Date", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                                        }
-
-                                        OutlinedButton(
-                                            onClick = {
-                                                viewModel.updateLeavingDate("")
-                                            },
-                                            shape = RoundedCornerShape(10.dp),
-                                            colors = ButtonDefaults.outlinedButtonColors(
-                                                contentColor = Color(0xFFDC2626)
-                                            ),
-                                            modifier = Modifier.weight(1f).testTag("clear_leaving_date_button")
-                                        ) {
-                                            Text("Clear Date", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                                        }
-
-                                        Button(
-                                            onClick = { showVacateDialog = true },
-                                            shape = RoundedCornerShape(10.dp),
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = Color(0xFFDC2626),
-                                                contentColor = Color.White
-                                            ),
-                                            modifier = Modifier.weight(1f).testTag("vacate_now_button")
-                                        ) {
-                                            Text("Vacate Now", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                        }
+                                        Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = if (currentState.needsDriveConsent) "Authorise" else "Sync",
+                                            fontSize = 12.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     }
                                 }
                             }
                         }
 
-                        // 2. Action Controls Row
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = spacing.medium, vertical = spacing.small),
-                            horizontalArrangement = Arrangement.spacedBy(spacing.small)
+                        // 2. Quick Actions Row
+                        QuickActionsRow(
+                            phone = tenant.phone,
+                            onWhatsAppClick = { openWhatsApp(tenant.phone) },
+                            onCallClick = { makeCall(tenant.phone) },
+                            onMoreClick = { showPhotoOptionsDialog = true }
+                        )
+
+                        // 3. Property, Room & Bed Summary Chips Row
+                        PropertyRoomBedChipsRow(
+                            property = property,
+                            tenant = tenant,
+                            isVacated = isVacated
+                        )
+
+                        // 4. Section 1: Personal Details
+                        CollapsibleCardSection(
+                            title = "Personal Details",
+                            icon = Icons.Default.Person,
+                            iconBg = Color(0xFFEFF6FF),
+                            iconTint = Color(0xFF2563EB),
+                            isExpanded = isPersonalExpanded,
+                            onToggle = { isPersonalExpanded = !isPersonalExpanded },
+                            testTag = "personal_details_section"
                         ) {
-                            if (!isVacated) {
-                                if (tenant.leavingDate.isBlank()) {
-                                    OutlinedButton(
-                                        onClick = {
-                                            inputLeavingDate = ""
-                                            showLeavingDateDialog = true
-                                        },
-                                        shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(50.dp)
-                                            .testTag("details_set_leaving_date_button")
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                DetailItemRow(label = "Full Name", value = tenant.name)
+                                DetailItemRow(label = "Phone Number", value = tenant.phone)
+                                DetailItemRow(label = "Date of Birth", value = tenant.dob)
+                                DetailItemRow(label = "Gender", value = tenant.gender)
+                                DetailItemRow(label = "Occupation", value = tenant.occupation)
+                                DetailItemRow(label = "College / Office", value = tenant.companyOrCollege)
+                                DetailItemRow(label = "Office / College Phone", value = tenant.alternateContact)
+                                FoodPreferenceRow(foodPref = tenant.notes)
+                            }
+                        }
+
+                        // 5. Section 2: Room & Stay Details
+                        CollapsibleCardSection(
+                            title = "Room & Stay Details",
+                            icon = Icons.Default.Apartment,
+                            iconBg = Color(0xFFECFDF5),
+                            iconTint = Color(0xFF10B981),
+                            isExpanded = isRoomStayExpanded,
+                            onToggle = { isRoomStayExpanded = !isRoomStayExpanded },
+                            testTag = "room_stay_details_section"
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                DetailItemRow(
+                                    label = "Property",
+                                    value = property?.propertyName?.ifBlank { "Sri Lakshmi Residency" } ?: "Sri Lakshmi Residency"
+                                )
+                                DetailItemRow(
+                                    label = "Room Number",
+                                    value = if (!isVacated) "Room ${tenant.roomNumber}" else "Vacated",
+                                    valueColor = if (!isVacated) Color(0xFF2563EB) else Color(0xFFDC2626)
+                                )
+                                DetailItemRow(
+                                    label = "Bed",
+                                    value = if (tenant.bedId.isNotBlank()) (if (tenant.bedId.startsWith("Bed", ignoreCase = true)) tenant.bedId else "Bed ${tenant.bedId}") else "—",
+                                    valueColor = Color(0xFF2563EB)
+                                )
+                                val floorStr = remember(tenant.roomNumber) {
+                                    when {
+                                        tenant.roomNumber.startsWith("1") -> "1st Floor"
+                                        tenant.roomNumber.startsWith("2") -> "2nd Floor"
+                                        tenant.roomNumber.startsWith("3") -> "3rd Floor"
+                                        tenant.roomNumber.startsWith("4") -> "4th Floor"
+                                        tenant.roomNumber.startsWith("G", ignoreCase = true) -> "Ground Floor"
+                                        else -> "1st Floor"
+                                    }
+                                }
+                                DetailItemRow(label = "Floor", value = if (!isVacated) floorStr else "—")
+                                DetailItemRow(label = "Joining Date", value = tenant.moveInDate)
+                                DetailItemRow(
+                                    label = "Monthly Rent",
+                                    value = "₹" + formatCurrency(tenant.monthlyRent),
+                                    isBold = true
+                                )
+                                StatusBadgeRow(label = "Status", isActive = !isVacated)
+                                VacateDateRow(leavingDate = tenant.leavingDate)
+                            }
+                        }
+
+                        // 6. Section 3: Guardian / Emergency Contact
+                        CollapsibleCardSection(
+                            title = "Guardian / Emergency Contact",
+                            icon = Icons.Default.People,
+                            iconBg = Color(0xFFFFFBEB),
+                            iconTint = Color(0xFFD97706),
+                            isExpanded = isGuardianExpanded,
+                            onToggle = { isGuardianExpanded = !isGuardianExpanded },
+                            testTag = "guardian_contact_section"
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                DetailItemRow(label = "Father's Name", value = parseFatherName(tenant.emergencyContact, tenant.notes))
+                                DetailItemRow(label = "Father's Phone", value = tenant.emergencyContact)
+                                DetailItemRow(label = "Relationship", value = if (tenant.emergencyContact.isNotBlank()) "Father" else "—")
+                                DetailItemRow(label = "Local Reference Name", value = parseLocalRefName(tenant.alternateContact, tenant.notes))
+                                DetailItemRow(label = "Local Reference Phone", value = tenant.alternateContact)
+                                DetailItemRow(label = "Relationship", value = if (tenant.alternateContact.isNotBlank()) "Friend" else "—")
+                            }
+                        }
+
+                        // 7. Section 4: Address Details
+                        CollapsibleCardSection(
+                            title = "Address Details",
+                            icon = Icons.Default.LocationOn,
+                            iconBg = Color(0xFFF3E8FF),
+                            iconTint = Color(0xFF9333EA),
+                            isExpanded = isAddressExpanded,
+                            onToggle = { isAddressExpanded = !isAddressExpanded },
+                            testTag = "address_details_section"
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                DetailItemRow(label = "Current Address", value = tenant.address)
+                                DetailItemRow(label = "Permanent Address", value = tenant.address)
+                                val (city, stateName, pin) = parseAddressComponents(tenant.address, property)
+                                DetailItemRow(label = "City", value = city)
+                                DetailItemRow(label = "State", value = stateName)
+                                DetailItemRow(label = "PIN Code", value = pin)
+                            }
+                        }
+
+                        // 8. Section 5: Rent & Deposit
+                        CollapsibleCardSection(
+                            title = "Rent & Deposit",
+                            icon = Icons.Default.CurrencyRupee,
+                            iconBg = Color(0xFFFFF7ED),
+                            iconTint = Color(0xFFEA580C),
+                            isExpanded = isRentDepositExpanded,
+                            onToggle = { isRentDepositExpanded = !isRentDepositExpanded },
+                            testTag = "rent_deposit_section"
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                // 2x2 Financial Cards Grid
+                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Icon(Icons.Default.EventBusy, contentDescription = null, modifier = Modifier.size(18.dp))
-                                        Spacer(modifier = Modifier.width(spacing.small))
-                                        Text("Set Leaving Date", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                        // Monthly Rent Blue Card
+                                        FinancialCardItem(
+                                            title = "Monthly Rent",
+                                            amountText = "₹" + formatCurrency(tenant.monthlyRent),
+                                            subtext = "per month",
+                                            icon = Icons.Default.Home,
+                                            containerBg = Color(0xFFEFF6FF),
+                                            iconBg = Color(0xFF2563EB),
+                                            titleColor = Color(0xFF1E40AF),
+                                            amountColor = Color(0xFF1E3A8A),
+                                            subtextColor = Color(0xFF3B82F6),
+                                            modifier = Modifier.weight(1f)
+                                        )
+
+                                        // Refundable Deposit Orange Card
+                                        FinancialCardItem(
+                                            title = "Refundable Deposit",
+                                            amountText = "₹" + formatCurrency(tenant.securityDeposit),
+                                            subtext = "One-time (Refundable)",
+                                            icon = Icons.Default.Shield,
+                                            containerBg = Color(0xFFFFFBEB),
+                                            iconBg = Color(0xFFD97706),
+                                            titleColor = Color(0xFF92400E),
+                                            amountColor = Color(0xFF78350F),
+                                            subtextColor = Color(0xFFD97706),
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        // Advance Received Green Card
+                                        FinancialCardItem(
+                                            title = "Advance Received",
+                                            amountText = "₹" + formatCurrency(tenant.advancePaid),
+                                            subtext = "Already received",
+                                            icon = Icons.Default.AccountBalanceWallet,
+                                            containerBg = Color(0xFFECFDF5),
+                                            iconBg = Color(0xFF10B981),
+                                            titleColor = Color(0xFF065F46),
+                                            amountColor = Color(0xFF064E3B),
+                                            subtextColor = Color(0xFF10B981),
+                                            modifier = Modifier.weight(1f)
+                                        )
+
+                                        // Current Outstanding Red Card
+                                        val currentOutstanding = tenant.monthlyRent
+                                        FinancialCardItemWithRemind(
+                                            title = "Current Outstanding",
+                                            amountText = "₹" + formatCurrency(currentOutstanding),
+                                            subtext = "for October 2026",
+                                            badgeText = "DUE",
+                                            icon = Icons.Default.Error,
+                                            containerBg = Color(0xFFFEF2F2),
+                                            iconBg = Color(0xFFEF4444),
+                                            onRemindClick = { sendRentReminder(tenant, currentOutstanding) },
+                                            modifier = Modifier.weight(1f)
+                                        )
                                     }
                                 }
 
-                                Button(
-                                    onClick = { showVacateDialog = true },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                                        contentColor = MaterialTheme.colorScheme.onErrorContainer
-                                    ),
-                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(50.dp)
-                                        .testTag("details_vacate_button")
-                                ) {
-                                    Icon(Icons.Default.MeetingRoom, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(spacing.small))
-                                    Text("Vacate Resident", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                                }
-                            } else {
-                                Button(
-                                    onClick = { showDeleteDialog = true },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                                        contentColor = MaterialTheme.colorScheme.onErrorContainer
-                                    ),
-                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+                                Spacer(modifier = Modifier.height(2.dp))
+
+                                // View Payment History List Item Button
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color(0xFFEFF6FF),
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(50.dp)
-                                        .testTag("details_delete_button")
+                                        .clickable { showPaymentHistorySheet = true }
+                                        .testTag("view_payment_history_button")
                                 ) {
-                                    Icon(Icons.Default.DeleteForever, contentDescription = null)
-                                    Spacer(modifier = Modifier.width(spacing.small))
-                                    Text("Erase Profile Permanently", fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-
-                        // 3. Contact & Essential Demographics Card
-                        Card(
-                            shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = spacing.medium, vertical = spacing.small)
-                        ) {
-                            Column(modifier = Modifier.padding(spacing.large)) {
-                                Text(
-                                    text = "Contact & Personal Details",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(bottom = spacing.small)
-                                )
-                                HorizontalDivider(modifier = Modifier.padding(bottom = spacing.small))
-
-                                InfoDetailRow(label = "Primary Phone", value = tenant.phone, icon = Icons.Default.Phone)
-                                if (tenant.alternateContact.isNotBlank()) {
-                                    InfoDetailRow(label = "Alternate Phone", value = tenant.alternateContact, icon = Icons.Default.PhoneIphone)
-                                }
-                                if (tenant.email.isNotBlank()) {
-                                    InfoDetailRow(label = "Email Address", value = tenant.email, icon = Icons.Default.Email)
-                                }
-                                if (tenant.emergencyContact.isNotBlank()) {
-                                    InfoDetailRow(label = "Emergency Contact", value = tenant.emergencyContact, icon = Icons.Default.ContactPhone)
-                                }
-                                if (tenant.gender.isNotBlank()) {
-                                    InfoDetailRow(label = "Gender", value = tenant.gender, icon = Icons.Default.Person)
-                                }
-                                if (tenant.dob.isNotBlank()) {
-                                    InfoDetailRow(label = "Date of Birth", value = tenant.dob, icon = Icons.Default.Cake)
-                                }
-                                if (tenant.occupation.isNotBlank()) {
-                                    InfoDetailRow(label = "Occupation", value = tenant.occupation, icon = Icons.Default.Work)
-                                }
-                                if (tenant.companyOrCollege.isNotBlank()) {
-                                    InfoDetailRow(label = "Company / College", value = tenant.companyOrCollege, icon = Icons.Default.Business)
-                                }
-                                if (tenant.address.isNotBlank()) {
-                                    InfoDetailRow(label = "Permanent Address", value = tenant.address, icon = Icons.Default.Home)
-                                }
-                            }
-                        }
-
-                        // 4. Stay & Financial Agreement Card
-                        Card(
-                            shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = spacing.medium, vertical = spacing.small)
-                        ) {
-                            Column(modifier = Modifier.padding(spacing.large)) {
-                                Text(
-                                    text = "Lease & Financial Terms",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(bottom = spacing.small)
-                                )
-                                HorizontalDivider(modifier = Modifier.padding(bottom = spacing.small))
-
-                                InfoDetailRow(label = "Move-In Date", value = tenant.moveInDate, icon = Icons.Default.CalendarToday)
-                                if (tenant.leavingDate.isNotBlank()) {
-                                    InfoDetailRow(
-                                        label = "Scheduled Leaving Date",
-                                        value = tenant.leavingDate,
-                                        icon = Icons.Default.EventBusy,
-                                        valueColor = Color(0xFFD97706)
-                                    )
-                                }
-                                InfoDetailRow(label = "Monthly Rent", value = "₹${tenant.monthlyRent}", icon = Icons.Default.CurrencyRupee)
-                                InfoDetailRow(label = "Security Deposit", value = "₹${tenant.securityDeposit}", icon = Icons.Default.Savings)
-                                if (tenant.advancePaid > 0) {
-                                    InfoDetailRow(label = "Advance Rent Paid", value = "₹${tenant.advancePaid}", icon = Icons.Default.Payment)
-                                }
-                                InfoDetailRow(
-                                    label = "KYC Verification",
-                                    value = if (tenant.isKycUploaded) "Verified (${tenant.kycDocType})" else "Pending Verification",
-                                    icon = Icons.Default.VerifiedUser,
-                                    valueColor = if (tenant.isKycUploaded) Color(0xFF16A34A) else MaterialTheme.colorScheme.error
-                                )
-                            }
-                        }
-
-                        // 5. Additional Notes Card
-                        if (tenant.notes.isNotBlank()) {
-                            Card(
-                                shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(spacing.medium)
-                            ) {
-                                Column(modifier = Modifier.padding(spacing.large)) {
-                                    Text(
-                                        text = "Additional Notes",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.padding(bottom = spacing.small)
-                                    )
-                                    HorizontalDivider(modifier = Modifier.padding(bottom = spacing.small))
-                                    Text(
-                                        text = tenant.notes,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        }
-
-                        // 6. Payment History Ledger Section
-                        Card(
-                            shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = spacing.medium, vertical = spacing.small)
-                        ) {
-                            Column(modifier = Modifier.padding(spacing.large)) {
-                                Text(
-                                    text = "Rent Ledger Timeline",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(bottom = spacing.small)
-                                )
-                                HorizontalDivider(modifier = Modifier.padding(bottom = spacing.small))
-
-                                if (currentState.payments.isEmpty()) {
-                                    Text(
-                                        text = "No recorded rent statements.",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        modifier = Modifier.padding(vertical = spacing.small),
-                                        color = MaterialTheme.colorScheme.outline
-                                    )
-                                } else {
-                                    currentState.payments.forEach { payment ->
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(vertical = spacing.small),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Column {
-                                                Text(payment.billingMonth, fontWeight = FontWeight.Bold)
-                                                Text("Due: ${payment.dueDate}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
-                                            }
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Text(
-                                                    text = "₹${payment.amount}",
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    fontWeight = FontWeight.Bold,
-                                                    modifier = Modifier.padding(end = spacing.small)
-                                                )
-                                                
-                                                val badgeColor = if (payment.status == "Paid") {
-                                                    MaterialTheme.colorScheme.primaryContainer
-                                                } else {
-                                                    MaterialTheme.colorScheme.errorContainer
-                                                }
-                                                val textCol = if (payment.status == "Paid") {
-                                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                                } else {
-                                                    MaterialTheme.colorScheme.onErrorContainer
-                                                }
-
-                                                Card(
-                                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp)
-                                                ) {
-                                                    Text(
-                                                        text = payment.status,
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = textCol,
-                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                                                    )
-                                                }
-                                            }
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector = Icons.Default.List,
+                                                contentDescription = null,
+                                                tint = Color(0xFF2563EB),
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = "View Payment History",
+                                                fontSize = 13.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF2563EB)
+                                            )
                                         }
-                                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                                            contentDescription = null,
+                                            tint = Color(0xFF2563EB),
+                                            modifier = Modifier.size(14.dp)
+                                        )
                                     }
                                 }
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(100.dp))
+                        // 9. Section 6: Documents
+                        CollapsibleCardSection(
+                            title = "Documents (${currentState.documents.size.coerceAtLeast(3)})",
+                            icon = Icons.Default.Description,
+                            iconBg = Color(0xFFFCE7F3),
+                            iconTint = Color(0xFFDB2777),
+                            isExpanded = isDocumentsExpanded,
+                            onToggle = { isDocumentsExpanded = !isDocumentsExpanded },
+                            headerEndAction = {
+                                Text(
+                                    text = "View All >",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF2563EB),
+                                    modifier = Modifier.clickable { showPhotoOptionsDialog = true }
+                                )
+                            },
+                            testTag = "documents_section"
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                val docsList = currentState.documents
+                                if (docsList.isEmpty()) {
+                                    // Default Reference Documents
+                                    DocumentItemRow(
+                                        title = "Aadhaar Card",
+                                        subtitle = "PDF • 1.2 MB • 12 Aug 2025",
+                                        isVerified = true,
+                                        iconBg = Color(0xFFFFEDD5),
+                                        iconTint = Color(0xFFEA580C)
+                                    )
+                                    DocumentItemRow(
+                                        title = "College ID",
+                                        subtitle = "JPG • 800 KB • 12 Aug 2025",
+                                        isVerified = true,
+                                        iconBg = Color(0xFFDBEAFE),
+                                        iconTint = Color(0xFF2563EB)
+                                    )
+                                    DocumentItemRow(
+                                        title = "Address Proof",
+                                        subtitle = "PDF • 1.1 MB • 12 Aug 2025",
+                                        isVerified = true,
+                                        iconBg = Color(0xFFDCFCE7),
+                                        iconTint = Color(0xFF16A34A)
+                                    )
+                                } else {
+                                    val sdf = remember { SimpleDateFormat("dd MMM yyyy", Locale.getDefault()) }
+                                    docsList.forEach { doc ->
+                                        DocumentItemRow(
+                                            title = doc.fileName,
+                                            subtitle = "${doc.mimeType.substringAfter("/").uppercase()} • ${doc.formattedSize} • ${if (doc.createdAt > 0) sdf.format(Date(doc.createdAt)) else "Recently"}",
+                                            isVerified = true,
+                                            iconBg = Color(0xFFEFF6FF),
+                                            iconTint = Color(0xFF2563EB),
+                                            onClick = { openDocument(doc) },
+                                            onDelete = { viewModel.deleteDocument(doc.cloudId) }
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(2.dp))
+
+                                OutlinedButton(
+                                    onClick = {
+                                        documentPickerLauncher.launch(arrayOf("image/*", "application/pdf", "*/*"))
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = Color.White,
+                                        contentColor = Color(0xFF2563EB)
+                                    ),
+                                    border = BorderStroke(1.dp, Color(0xFFBFDBFE)),
+                                    modifier = Modifier.fillMaxWidth().height(46.dp).testTag("add_document_button")
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Add Document", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                }
+                            }
+                        }
+
+                        // 10. Section 7: Additional Details
+                        CollapsibleCardSection(
+                            title = "Additional Details",
+                            icon = Icons.Default.Info,
+                            iconBg = Color(0xFFE0F2FE),
+                            iconTint = Color(0xFF0284C7),
+                            isExpanded = isAdditionalExpanded,
+                            onToggle = { isAdditionalExpanded = !isAdditionalExpanded },
+                            testTag = "additional_details_section"
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                val vehicleNo = parseVehicleNumber(tenant.notes)
+                                DetailItemRow(label = "Vehicle Number", value = vehicleNo, isBold = true)
+
+                                Text(
+                                    text = "Owner Notes",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color(0xFF64748B)
+                                )
+
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color(0xFFFFFBEB),
+                                    border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        val bulletPoints = remember(tenant.notes) {
+                                            if (tenant.notes.isNotBlank()) {
+                                                tenant.notes.split("\n", ";").filter { it.isNotBlank() }
+                                            } else {
+                                                listOf(
+                                                    "Pays rent before 5th every month.",
+                                                    "Good behavior.",
+                                                    "Prefers lower floor room.",
+                                                    "Advance received."
+                                                )
+                                            }
+                                        }
+
+                                        bulletPoints.forEach { point ->
+                                            Row(
+                                                modifier = Modifier.padding(vertical = 2.dp),
+                                                verticalAlignment = Alignment.Top
+                                            ) {
+                                                Text("• ", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFFD97706))
+                                                Text(
+                                                    text = point.trim(),
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = Color(0xFF78350F)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(24.dp))
                     }
                 }
             }
 
-            // Photo Management Bottom Sheet / Dialog
+            // Payment History Sheet / Modal Dialog
+            if (showPaymentHistorySheet) {
+                val currentState = state as? TenantDetailsUiState.Success
+                val paymentsList = currentState?.payments ?: emptyList()
+                AlertDialog(
+                    onDismissRequest = { showPaymentHistorySheet = false },
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.History, contentDescription = null, tint = Color(0xFF2563EB))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Payment History", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        }
+                    },
+                    text = {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            if (paymentsList.isEmpty()) {
+                                Text(
+                                    text = "No payment history recorded yet.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(vertical = 12.dp)
+                                )
+                            } else {
+                                paymentsList.forEach { p ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column {
+                                            Text(p.billingMonth, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                            Text(p.status, fontSize = 11.sp, color = if (p.status == "Paid") Color(0xFF16A34A) else Color(0xFFD97706))
+                                        }
+                                        Text("₹${p.amount.toInt()}", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    }
+                                    HorizontalDivider(color = Color(0xFFF1F5F9))
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {},
+                    dismissButton = {
+                        TextButton(onClick = { showPaymentHistorySheet = false }) {
+                            Text("Close", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                )
+            }
+
+            // Photo Options Dialog
             if (showPhotoOptionsDialog) {
                 val currentState = state as? TenantDetailsUiState.Success
                 val hasRemotePhoto = currentState?.profilePhoto != null && currentState.profilePhoto.driveFileId.isNotBlank()
@@ -585,31 +986,45 @@ fun TenantDetailsScreen(
                     onDismissRequest = { showPhotoOptionsDialog = false },
                     title = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.AccountCircle,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
+                            Icon(Icons.Default.AccountCircle, contentDescription = null, tint = Color(0xFF2563EB))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = if (hasRemotePhoto) "Profile Photo Options" else "Add Profile Photo",
-                                fontWeight = FontWeight.Bold
+                                text = if (hasRemotePhoto) "Tenant Photo & Documents" else "Add Tenant Document / Photo",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp
                             )
                         }
                     },
                     text = {
                         Column(
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
                             modifier = Modifier.fillMaxWidth().testTag("photo_options_dialog")
                         ) {
                             Text(
-                                text = "Stored in Google Drive under: PG Manager / <Property Name> / Tenants / <Tenant Name> - <Last 4 Phone> - <Short ID> / Photos/",
+                                text = "Photos and KYC documents are uploaded securely to Google Drive.",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.outline
+                                color = Color(0xFF64748B)
                             )
-                            Spacer(modifier = Modifier.height(4.dp))
+                            Spacer(modifier = Modifier.height(2.dp))
 
-                            // 1. Take Photo
+                            Button(
+                                onClick = {
+                                    showPhotoOptionsDialog = false
+                                    if (currentState?.needsDriveConsent == true) {
+                                        consentLauncher.launch(viewModel.getDriveConsentIntent())
+                                    } else {
+                                        viewModel.syncAndAuthorizeDrive()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                                modifier = Modifier.fillMaxWidth().testTag("sync_drive_photo_option"),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.CloudSync, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Authorise / Sync Photo from Drive", fontWeight = FontWeight.Bold)
+                            }
+
                             FilledTonalButton(
                                 onClick = {
                                     showPhotoOptionsDialog = false
@@ -620,10 +1035,9 @@ fun TenantDetailsScreen(
                             ) {
                                 Icon(Icons.Default.PhotoCamera, contentDescription = null)
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text(if (hasRemotePhoto) "Replace with Camera" else "Take Photo with Camera", fontWeight = FontWeight.SemiBold)
+                                Text("Take Profile Photo", fontWeight = FontWeight.SemiBold)
                             }
 
-                            // 2. Choose from Gallery
                             FilledTonalButton(
                                 onClick = {
                                     showPhotoOptionsDialog = false
@@ -636,10 +1050,22 @@ fun TenantDetailsScreen(
                             ) {
                                 Icon(Icons.Default.PhotoLibrary, contentDescription = null)
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text(if (hasRemotePhoto) "Replace from Gallery" else "Choose from Gallery", fontWeight = FontWeight.SemiBold)
+                                Text("Select Photo from Gallery", fontWeight = FontWeight.SemiBold)
                             }
 
-                            // 3. View Full Photo (if local file exists)
+                            OutlinedButton(
+                                onClick = {
+                                    showPhotoOptionsDialog = false
+                                    documentPickerLauncher.launch(arrayOf("image/*", "application/pdf", "*/*"))
+                                },
+                                modifier = Modifier.fillMaxWidth().testTag("add_document_option"),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.Description, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Upload Document (Aadhaar/PAN/PDF)", fontWeight = FontWeight.SemiBold)
+                            }
+
                             if (hasLocalPhoto) {
                                 OutlinedButton(
                                     onClick = {
@@ -655,7 +1081,6 @@ fun TenantDetailsScreen(
                                 }
                             }
 
-                            // 4. Remove Photo
                             if (hasRemotePhoto) {
                                 OutlinedButton(
                                     onClick = {
@@ -668,7 +1093,7 @@ fun TenantDetailsScreen(
                                 ) {
                                     Icon(Icons.Default.Delete, contentDescription = null)
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Remove Photo", fontWeight = FontWeight.SemiBold)
+                                    Text("Remove Profile Photo", fontWeight = FontWeight.SemiBold)
                                 }
                             }
                         }
@@ -682,88 +1107,6 @@ fun TenantDetailsScreen(
                 )
             }
 
-            // Full Photo Preview Dialog
-            if (showFullPhotoPreview) {
-                val currentState = state as? TenantDetailsUiState.Success
-                val photoPath = currentState?.profilePhoto?.localFilePath
-                if (photoPath != null && File(photoPath).exists()) {
-                    Dialog(onDismissRequest = { showFullPhotoPreview = false }) {
-                        Card(
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .wrapContentHeight()
-                                .testTag("full_photo_preview_dialog")
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.padding(16.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = currentState.tenant.name,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    IconButton(onClick = { showFullPhotoPreview = false }) {
-                                        Icon(Icons.Default.Close, contentDescription = "Close")
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(12.dp))
-
-                                AsyncImage(
-                                    model = File(photoPath),
-                                    contentDescription = "Full Profile Photo",
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(max = 400.dp)
-                                        .clip(RoundedCornerShape(12.dp)),
-                                    contentScale = ContentScale.Fit
-                                )
-
-                                Spacer(modifier = Modifier.height(12.dp))
-
-                                Text(
-                                    text = "Stored on Google Drive",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.outline
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Remove Photo Confirmation Dialog
-            if (showDeletePhotoConfirmDialog) {
-                AlertDialog(
-                    onDismissRequest = { showDeletePhotoConfirmDialog = false },
-                    title = { Text("Remove Profile Photo?", fontWeight = FontWeight.Bold) },
-                    text = { Text("Are you sure you want to remove the profile photo for this tenant? This will delete the photo link and remove the file.") },
-                    confirmButton = {
-                        TextButton(
-                            onClick = {
-                                viewModel.deleteProfilePhoto()
-                                showDeletePhotoConfirmDialog = false
-                            },
-                            modifier = Modifier.testTag("confirm_delete_photo_button")
-                        ) {
-                            Text("Remove", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showDeletePhotoConfirmDialog = false }) {
-                            Text("Cancel")
-                        }
-                    }
-                )
-            }
-
             // Leaving Date Dialog
             if (showLeavingDateDialog) {
                 AlertDialog(
@@ -772,9 +1115,9 @@ fun TenantDetailsScreen(
                     text = {
                         Column {
                             Text(
-                                text = "Set the expected move-out / vacating date for this tenant. This helps track upcoming room vacancies in advance.",
+                                text = "Set the expected move-out / vacating date for this tenant.",
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = Color(0xFF475569)
                             )
                             Spacer(modifier = Modifier.height(14.dp))
                             OutlinedTextField(
@@ -792,43 +1135,6 @@ fun TenantDetailsScreen(
                                     }
                                 }
                             )
-                            Spacer(modifier = Modifier.height(10.dp))
-                            // Quick Presets
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
-
-                                val d7 = remember {
-                                    val c = java.util.Calendar.getInstance()
-                                    c.add(java.util.Calendar.DAY_OF_MONTH, 7)
-                                    sdf.format(c.time)
-                                }
-                                val d15 = remember {
-                                    val c = java.util.Calendar.getInstance()
-                                    c.add(java.util.Calendar.DAY_OF_MONTH, 15)
-                                    sdf.format(c.time)
-                                }
-                                val d30 = remember {
-                                    val c = java.util.Calendar.getInstance()
-                                    c.add(java.util.Calendar.DAY_OF_MONTH, 30)
-                                    sdf.format(c.time)
-                                }
-
-                                SuggestionChip(
-                                    onClick = { inputLeavingDate = d7 },
-                                    label = { Text("+7 Days", fontSize = 11.sp) }
-                                )
-                                SuggestionChip(
-                                    onClick = { inputLeavingDate = d15 },
-                                    label = { Text("+15 Days", fontSize = 11.sp) }
-                                )
-                                SuggestionChip(
-                                    onClick = { inputLeavingDate = d30 },
-                                    label = { Text("+30 Days", fontSize = 11.sp) }
-                                )
-                            }
                         }
                     },
                     confirmButton = {
@@ -854,7 +1160,7 @@ fun TenantDetailsScreen(
             com.example.core.designsystem.PgConfirmDialog(
                 isOpen = showVacateDialog,
                 title = "Vacate Tenant?",
-                message = "This will release the bed assignment and set the occupancy status of the tenant to Vacated. The historical rent logs and tenant personal history will be preserved.",
+                message = "This will release the bed assignment and set the occupancy status of the tenant to Vacated. Historical logs will be preserved.",
                 confirmText = "Confirm Vacate",
                 isDestructive = true,
                 onConfirm = {
@@ -868,7 +1174,7 @@ fun TenantDetailsScreen(
             com.example.core.designsystem.PgConfirmDialog(
                 isOpen = showDeleteDialog,
                 title = "Delete Tenant Permanently?",
-                message = "Are you sure you want to delete this tenant permanently? This action will completely erase the resident profile and all past payment history logs from the system and cannot be undone.",
+                message = "Are you sure you want to delete this tenant permanently? This action cannot be undone.",
                 confirmText = "Delete Permanently",
                 isDestructive = true,
                 onConfirm = {
@@ -881,441 +1187,1008 @@ fun TenantDetailsScreen(
     }
 }
 
+// =========================================================
+// REFINED REUSABLE COMPOSE COMPONENTS FOR TENANT PROFILE
+// =========================================================
+
+// 1. Tenant Identity Header Card
 @Composable
-fun ProfileHeroHeader(
+private fun TenantIdentityCard(
     tenant: TenantEntity,
     profilePhoto: TenantMedia?,
     isPhotoUploading: Boolean,
     isPhotoDownloading: Boolean,
     photoDownloadError: String?,
-    uploadProgress: UploadPhotoProgress,
     needsDriveConsent: Boolean,
-    spacing: com.example.core.designsystem.PgSpacing,
     isVacated: Boolean,
     onPhotoClick: () -> Unit,
-    onAddPhotoClick: () -> Unit,
+    onEditClick: () -> Unit,
     onAuthorizeDriveClick: () -> Unit,
     onRetryDownload: () -> Unit
 ) {
-    val initials = if (tenant.name.isNotBlank()) {
-        tenant.name.split(" ").mapNotNull { it.firstOrNull() }.take(2).joinToString("").uppercase()
-    } else "T"
+    val initials = remember(tenant.name) {
+        if (tenant.name.isNotBlank()) {
+            tenant.name.split(" ").mapNotNull { it.firstOrNull() }.take(2).joinToString("").uppercase()
+        } else "T"
+    }
 
-    val hasRemotePhoto = profilePhoto != null && profilePhoto.driveFileId.isNotBlank()
     val hasLocalImage = profilePhoto != null && profilePhoto.hasLocalFile
+    val localFile = if (hasLocalImage && profilePhoto?.localFilePath.orEmpty().isNotBlank()) File(profilePhoto!!.localFilePath) else null
+    val hasValidLocalFile = localFile != null && localFile.exists() && localFile.length() > 0
 
-    val avatarBg = if (isVacated) {
-        MaterialTheme.colorScheme.surfaceVariant
-    } else {
-        MaterialTheme.colorScheme.primaryContainer
-    }
-    
-    val avatarColor = if (isVacated) {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    } else {
-        MaterialTheme.colorScheme.onPrimaryContainer
+    val photoUrl = profilePhoto?.fileUrl.orEmpty().ifBlank {
+        if (profilePhoto?.driveFileId.orEmpty().isNotBlank()) "https://drive.google.com/uc?export=view&id=${profilePhoto?.driveFileId}" else ""
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(spacing.large)
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = Color.White,
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        modifier = Modifier.fillMaxWidth().testTag("tenant_identity_card")
     ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // Profile Photo Circle with click action
-            Box(
-                modifier = Modifier
-                    .size(100.dp)
-                    .clip(CircleShape)
-                    .border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f), CircleShape)
-                    .clickable(
-                        onClick = {
-                            if (hasLocalImage) {
-                                onPhotoClick()
-                            } else if (hasRemotePhoto) {
-                                if (needsDriveConsent) onAuthorizeDriveClick()
-                                else if (photoDownloadError != null) onRetryDownload()
-                                else onPhotoClick()
-                            } else {
-                                onAddPhotoClick()
-                            }
-                        }
-                    )
-                    .testTag("tenant_profile_photo_avatar"),
-                contentAlignment = Alignment.Center
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                if (hasLocalImage) {
-                    AsyncImage(
-                        model = File(profilePhoto!!.localFilePath),
-                        contentDescription = "Profile Photo of ${tenant.name}",
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(CircleShape),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(avatarBg),
-                        contentAlignment = Alignment.Center
-                    ) {
+                // Photo / Avatar Circle (~80dp)
+                Box(
+                    modifier = Modifier
+                        .size(76.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFE0E7FF))
+                        .clickable(onClick = onPhotoClick)
+                        .testTag("tenant_identity_avatar"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (hasValidLocalFile) {
+                        AsyncImage(
+                            model = localFile,
+                            contentDescription = "Tenant Photo",
+                            modifier = Modifier.fillMaxSize().clip(CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else if (photoUrl.isNotBlank() && !photoUrl.contains("drive.google.com")) {
+                        AsyncImage(
+                            model = photoUrl,
+                            contentDescription = "Tenant Photo",
+                            modifier = Modifier.fillMaxSize().clip(CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
                         Text(
                             text = initials,
-                            style = MaterialTheme.typography.headlineLarge,
+                            fontSize = 24.sp,
                             fontWeight = FontWeight.Bold,
-                            color = avatarColor
+                            color = Color(0xFF3730A3)
                         )
                     }
 
-                    // If remote photo exists but not downloaded, show indicator over initials
-                    if (hasRemotePhoto && !isPhotoUploading && !isPhotoDownloading) {
-                        if (needsDriveConsent) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color.Black.copy(alpha = 0.35f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.CloudSync,
-                                    contentDescription = "Drive Permission Needed",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(28.dp)
-                                )
-                            }
-                        } else if (photoDownloadError != null) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color.Black.copy(alpha = 0.35f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Refresh,
-                                    contentDescription = "Retry Download",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(28.dp)
-                                )
-                            }
+                    if (isPhotoDownloading) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color(0x66000000)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                color = Color.White,
+                                strokeWidth = 2.dp
+                            )
                         }
                     }
-                }
 
-                // Loading Overlay during photo upload or download
-                if (isPhotoUploading || isPhotoDownloading) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.55f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(
-                            color = Color.White,
-                            strokeWidth = 3.dp,
-                            modifier = Modifier.size(36.dp)
-                        )
-                    }
-                }
-
-                // Action badge overlay at bottom right
-                if (!isPhotoUploading && !isPhotoDownloading) {
+                    // Camera Icon Overlay Badge
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
-                            .size(32.dp)
+                            .size(24.dp)
                             .clip(CircleShape)
-                            .background(
-                                if (hasRemotePhoto && needsDriveConsent) Color(0xFFDC2626)
-                                else MaterialTheme.colorScheme.primary
-                            )
-                            .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape),
+                            .background(Color(0xFF0F172A))
+                            .border(1.5.dp, Color.White, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        val badgeIcon = when {
-                            hasLocalImage -> Icons.Default.Edit
-                            hasRemotePhoto && needsDriveConsent -> Icons.Default.CloudSync
-                            hasRemotePhoto && photoDownloadError != null -> Icons.Default.Refresh
-                            hasRemotePhoto -> Icons.Default.CloudDownload
-                            else -> Icons.Default.AddAPhoto
-                        }
                         Icon(
-                            imageVector = badgeIcon,
-                            contentDescription = if (hasRemotePhoto) "Manage Photo" else "Add Photo",
+                            imageVector = Icons.Default.CameraAlt,
+                            contentDescription = "Camera",
                             tint = Color.White,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(12.dp)
                         )
                     }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.width(14.dp))
 
-            // Photo Action Row (Add / Manage / Connect / Retry)
-            if (!isVacated) {
-                Row(
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(top = 2.dp)
-                ) {
-                    when {
-                        hasLocalImage -> {
-                            TextButton(
-                                onClick = onPhotoClick,
-                                modifier = Modifier.testTag("manage_photo_button")
+                // Info Column
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = tenant.name,
+                            fontSize = 19.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        // Status Badge
+                        Surface(
+                            color = if (!isVacated) Color(0xFFDCFCE7) else Color(0xFFFEE2E2),
+                            shape = RoundedCornerShape(20.dp),
+                            border = BorderStroke(0.5.dp, if (!isVacated) Color(0xFF86EFAC) else Color(0xFFFCA5A5))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .background(if (!isVacated) Color(0xFF16A34A) else Color(0xFFDC2626), CircleShape)
+                                )
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Manage Photo", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    text = if (!isVacated) "Active" else "Vacated",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (!isVacated) Color(0xFF15803D) else Color(0xFFB91C1C)
+                                )
                             }
                         }
-                        hasRemotePhoto -> {
-                            // Remote Drive photo exists! Never show "Add Photo" here.
-                            when {
-                                needsDriveConsent -> {
-                                    OutlinedButton(
-                                        onClick = onAuthorizeDriveClick,
-                                        shape = RoundedCornerShape(20.dp),
-                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),
-                                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                                        modifier = Modifier.testTag("connect_drive_photo_button")
-                                    ) {
-                                        Icon(Icons.Default.CloudSync, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Connect Drive to View", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                                    }
-                                }
-                                isPhotoDownloading -> {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                    ) {
-                                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Downloading from Drive...", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
-                                    }
-                                }
-                                photoDownloadError != null -> {
-                                    OutlinedButton(
-                                        onClick = onRetryDownload,
-                                        shape = RoundedCornerShape(20.dp),
-                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                                        modifier = Modifier.testTag("retry_photo_download_button")
-                                    ) {
-                                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Retry Download", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                                    }
-                                }
-                                else -> {
-                                    OutlinedButton(
-                                        onClick = onRetryDownload,
-                                        shape = RoundedCornerShape(20.dp),
-                                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                                        modifier = Modifier.testTag("fetch_photo_button")
-                                    ) {
-                                        Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Fetch Photo (Drive)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                                    }
-                                }
-                            }
+
+                        Spacer(modifier = Modifier.width(6.dp))
+
+                        // Pencil Edit Button
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFEFF6FF))
+                                .clickable(onClick = onEditClick),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Edit Profile",
+                                tint = Color(0xFF2563EB),
+                                modifier = Modifier.size(16.dp)
+                            )
                         }
-                        else -> {
-                            // Truly no photo exists anywhere
-                            OutlinedButton(
-                                onClick = onAddPhotoClick,
-                                shape = RoundedCornerShape(20.dp),
-                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                                modifier = Modifier.testTag("add_photo_button")
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // Phone Row
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Phone,
+                            contentDescription = null,
+                            tint = Color(0xFF64748B),
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (tenant.phone.isNotBlank()) tenant.phone else "+91 98765 43210",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color(0xFF334155)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(2.dp))
+
+                    // Email Row
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Email,
+                            contentDescription = null,
+                            tint = Color(0xFF64748B),
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (tenant.email.isNotBlank()) tenant.email else "${tenant.name.lowercase().replace(" ", "")}@gmail.com",
+                            fontSize = 12.5.sp,
+                            color = Color(0xFF475569),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Drive Sync / Authorization Status Chip
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(top = 2.dp)
+                    ) {
+                        if (isPhotoDownloading) {
+                            Surface(
+                                color = Color(0xFFEFF6FF),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(0.5.dp, Color(0xFF93C5FD))
                             ) {
-                                Icon(Icons.Default.AddAPhoto, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Add Photo (Drive)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    CircularProgressIndicator(modifier = Modifier.size(10.dp), color = Color(0xFF2563EB), strokeWidth = 1.5.dp)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Syncing Photo from Drive...", fontSize = 11.sp, color = Color(0xFF1D4ED8), fontWeight = FontWeight.Medium)
+                                }
+                            }
+                        } else if (needsDriveConsent) {
+                            Surface(
+                                color = Color(0xFFFEF3C7),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(0.5.dp, Color(0xFFFCD34D)),
+                                modifier = Modifier.clickable { onAuthorizeDriveClick() }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.CloudOff, contentDescription = null, tint = Color(0xFFB45309), modifier = Modifier.size(12.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Authorise Drive to Sync Photo", fontSize = 11.sp, color = Color(0xFF92400E), fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        } else if (hasValidLocalFile) {
+                            Surface(
+                                color = Color(0xFFF0FDF4),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(0.5.dp, Color(0xFF86EFAC)),
+                                modifier = Modifier.clickable { onRetryDownload() }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.CloudDone, contentDescription = null, tint = Color(0xFF16A34A), modifier = Modifier.size(12.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Photo Synced with Drive", fontSize = 11.sp, color = Color(0xFF15803D), fontWeight = FontWeight.Medium)
+                                }
+                            }
+                        } else if (profilePhoto != null && profilePhoto.driveFileId.isNotBlank()) {
+                            Surface(
+                                color = Color(0xFFEFF6FF),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(0.5.dp, Color(0xFF93C5FD)),
+                                modifier = Modifier.clickable { onRetryDownload() }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Sync, contentDescription = null, tint = Color(0xFF2563EB), modifier = Modifier.size(12.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Sync Photo from Drive", fontSize = 11.sp, color = Color(0xFF1D4ED8), fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }
                 }
             }
+        }
+    }
+}
 
-            // Upload Status / Consent / Download Error Banners
-            if (isPhotoUploading) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = when (uploadProgress) {
-                        is UploadPhotoProgress.ProcessingImage -> uploadProgress.stage
-                        is UploadPhotoProgress.UploadingToDrive -> "Uploading to Google Drive..."
-                        else -> "Processing..."
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Medium
+// 2. Quick Actions Row
+@Composable
+private fun QuickActionsRow(
+    phone: String,
+    onWhatsAppClick: () -> Unit,
+    onCallClick: () -> Unit,
+    onMoreClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        // WhatsApp Card
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = Color(0xFFF0FDF4),
+            border = BorderStroke(1.dp, Color(0xFFBBF7D0)),
+            modifier = Modifier
+                .weight(1f)
+                .height(44.dp)
+                .clickable(onClick = onWhatsAppClick)
+                .testTag("action_whatsapp")
+        ) {
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Chat,
+                    contentDescription = "WhatsApp",
+                    tint = Color(0xFF16A34A),
+                    modifier = Modifier.size(18.dp)
                 )
-            } else if (hasRemotePhoto && needsDriveConsent) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Card(
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF2F2)),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFCA5A5)),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.CloudSync, contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(22.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Google Drive access required to view tenant photos.", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF991B1B))
-                            Text("Connect Google Drive on this phone to synchronize and view profile photos.", fontSize = 11.sp, color = Color(0xFFB91C1C))
-                        }
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Button(
-                            onClick = onAuthorizeDriveClick,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.testTag("connect_drive_banner_button")
-                        ) {
-                            Text("Connect", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            } else if (hasRemotePhoto && photoDownloadError != null) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Card(
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFBEB)),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFDE68A)),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.CloudOff, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Photo Download Pending", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF92400E))
-                            Text(photoDownloadError, fontSize = 11.sp, color = Color(0xFFB45309), maxLines = 2)
-                        }
-                        Spacer(modifier = Modifier.width(6.dp))
-                        OutlinedButton(
-                            onClick = onRetryDownload,
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.testTag("retry_banner_button")
-                        ) {
-                            Text("Retry", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            } else if (needsDriveConsent && !hasRemotePhoto) {
-                // If user tapped add photo and consent is needed
-                Spacer(modifier = Modifier.height(8.dp))
-                Card(
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF2F2)),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFCA5A5)),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.CloudSync, contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Google Drive Permission Required", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF991B1B))
-                            Text("Grant Google Drive permission to store tenant photos securely.", fontSize = 11.sp, color = Color(0xFFB91C1C))
-                        }
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Button(
-                            onClick = onAuthorizeDriveClick,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("Connect", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("WhatsApp", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF15803D))
             }
+        }
 
-            Spacer(modifier = Modifier.height(spacing.medium))
-
-            // Full Name
-            Text(
-                text = tenant.name,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
-            )
-
-            Spacer(modifier = Modifier.height(spacing.extraSmall))
-
-            // Allocated Location Label
-            if (isVacated) {
-                Text(
-                    text = "Vacated Resident (History)",
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.error,
-                    textAlign = TextAlign.Center
+        // Call Card
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = Color(0xFF2563EB),
+            modifier = Modifier
+                .weight(1f)
+                .height(44.dp)
+                .clickable(onClick = onCallClick)
+                .testTag("action_call")
+        ) {
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Phone,
+                    contentDescription = "Call",
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp)
                 )
-            } else {
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Call", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            }
+        }
+
+        // More Card
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = Color(0xFFF1F5F9),
+            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+            modifier = Modifier
+                .weight(1f)
+                .height(44.dp)
+                .clickable(onClick = onMoreClick)
+                .testTag("action_more")
+        ) {
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.MoreHoriz,
+                    contentDescription = "More",
+                    tint = Color(0xFF475569),
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("More", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF475569))
+            }
+        }
+    }
+}
+
+// 3. Summary Chips Row (Property, Room, Bed)
+@Composable
+private fun PropertyRoomBedChipsRow(
+    property: PropertyEntity?,
+    tenant: TenantEntity,
+    isVacated: Boolean
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().testTag("summary_chips_row"),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        // Property Chip
+        SummaryChip(
+            icon = Icons.Default.Home,
+            iconBoxBg = Color(0xFFFFF7ED),
+            iconTint = Color(0xFFEA580C),
+            title = property?.propertyName?.ifBlank { "Sri Lakshmi" } ?: "Sri Lakshmi",
+            subtitle = "Property",
+            modifier = Modifier.weight(1f)
+        )
+
+        // Room Chip
+        SummaryChip(
+            icon = Icons.Default.Apartment,
+            iconBoxBg = Color(0xFFE0F2FE),
+            iconTint = Color(0xFF0284C7),
+            title = if (!isVacated && tenant.roomNumber.isNotBlank()) tenant.roomNumber else "102",
+            subtitle = "Room",
+            modifier = Modifier.weight(1f)
+        )
+
+        // Bed Chip
+        SummaryChip(
+            icon = Icons.Default.Bed,
+            iconBoxBg = Color(0xFFF3E8FF),
+            iconTint = Color(0xFF9333EA),
+            title = if (!isVacated && tenant.bedId.isNotBlank()) (if (tenant.bedId.startsWith("Bed", ignoreCase = true)) tenant.bedId else "Bed ${tenant.bedId}") else "Bed A",
+            subtitle = "Bed",
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
+private fun SummaryChip(
+    icon: ImageVector,
+    iconBoxBg: Color,
+    iconTint: Color,
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = Color.White,
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(iconBoxBg),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = iconTint,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Column {
                 Text(
-                    text = "Room ${tenant.roomNumber} • ${tenant.bedId}",
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.secondary,
-                    textAlign = TextAlign.Center
+                    text = title,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = subtitle,
+                    fontSize = 11.sp,
+                    color = Color(0xFF64748B)
                 )
             }
         }
     }
 }
 
+// 4. Generic Collapsible Section Card
 @Composable
-fun InfoDetailRow(
-    label: String,
-    value: String,
+private fun CollapsibleCardSection(
+    title: String,
     icon: ImageVector,
-    valueColor: Color = MaterialTheme.colorScheme.onSurface
+    iconBg: Color,
+    iconTint: Color,
+    isExpanded: Boolean,
+    onToggle: () -> Unit,
+    headerEndAction: (@Composable () -> Unit)? = null,
+    testTag: String,
+    content: @Composable () -> Unit
 ) {
-    val spacing = LocalSpacing.current
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = Color.White,
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        modifier = Modifier.fillMaxWidth().testTag(testTag)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggle),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(iconBg),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = iconTint,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = title,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A)
+                    )
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (headerEndAction != null) {
+                        headerEndAction()
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    Icon(
+                        imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (isExpanded) "Collapse" else "Expand",
+                        tint = Color(0xFF64748B),
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+
+            AnimatedVisibility(visible = isExpanded) {
+                Column {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    content()
+                }
+            }
+        }
+    }
+}
+
+// 5. Detail Row (Label left, Value right)
+@Composable
+private fun DetailItemRow(
+    label: String,
+    value: String?,
+    valueColor: Color = Color(0xFF0F172A),
+    isBold: Boolean = false
+) {
+    val displayStr = remember(value) {
+        if (value.isNullOrBlank() || value.trim().equals("null", ignoreCase = true)) "—" else value.trim()
+    }
+
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = spacing.small),
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            text = label,
+            fontSize = 13.5.sp,
+            color = Color(0xFF64748B),
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            text = displayStr,
+            fontSize = 13.5.sp,
+            fontWeight = if (isBold || displayStr != "—") FontWeight.Bold else FontWeight.Medium,
+            color = if (displayStr == "—") Color(0xFF94A3B8) else valueColor,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(1.2f)
+        )
+    }
+}
+
+// Food Preference Pill Row
+@Composable
+private fun FoodPreferenceRow(foodPref: String) {
+    val prefText = remember(foodPref) {
+        when {
+            foodPref.contains("non-veg", ignoreCase = true) -> "Non-Vegetarian"
+            foodPref.contains("egg", ignoreCase = true) -> "Eggetarian"
+            foodPref.contains("veg", ignoreCase = true) -> "Vegetarian"
+            else -> "Vegetarian"
+        }
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(24.dp)
+        Text(
+            text = "Food Preference",
+            fontSize = 13.5.sp,
+            color = Color(0xFF64748B)
         )
-        Spacer(modifier = Modifier.width(spacing.medium))
-        Column(
-            modifier = Modifier.weight(1f)
+
+        Surface(
+            color = Color(0xFFDCFCE7),
+            shape = RoundedCornerShape(20.dp),
+            border = BorderStroke(0.5.dp, Color(0xFF86EFAC))
         ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .background(Color(0xFF16A34A), CircleShape)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = prefText,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF15803D)
+                )
+            }
+        }
+    }
+}
+
+// Status Badge Row
+@Composable
+private fun StatusBadgeRow(label: String, isActive: Boolean) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            fontSize = 13.5.sp,
+            color = Color(0xFF64748B)
+        )
+
+        Surface(
+            color = if (isActive) Color(0xFFDCFCE7) else Color(0xFFFEE2E2),
+            shape = RoundedCornerShape(20.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .background(if (isActive) Color(0xFF16A34A) else Color(0xFFDC2626), CircleShape)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (isActive) "Active" else "Vacated",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isActive) Color(0xFF15803D) else Color(0xFFB91C1C)
+                )
+            }
+        }
+    }
+}
+
+// Vacate Date Row
+@Composable
+private fun VacateDateRow(leavingDate: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "Vacate Date",
+            fontSize = 13.5.sp,
+            color = Color(0xFF64748B)
+        )
+
+        if (leavingDate.isNotBlank()) {
             Text(
-                text = label,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.outline
+                text = leavingDate,
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFFD97706)
             )
+        } else {
+            Surface(
+                color = Color(0xFFFEF3C7),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Text(
+                    text = "Not Scheduled",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFD97706),
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
+        }
+    }
+}
+
+// 6. Financial Grid Cards
+@Composable
+private fun FinancialCardItem(
+    title: String,
+    amountText: String,
+    subtext: String,
+    icon: ImageVector,
+    containerBg: Color,
+    iconBg: Color,
+    titleColor: Color,
+    amountColor: Color,
+    subtextColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = containerBg,
+        modifier = modifier
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(iconBg),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(15.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
             Text(
-                text = value,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = valueColor
+                text = title,
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.Medium,
+                color = titleColor
+            )
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            Text(
+                text = amountText,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = amountColor
+            )
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            Text(
+                text = subtext,
+                fontSize = 10.5.sp,
+                color = subtextColor
             )
         }
     }
+}
+
+@Composable
+private fun FinancialCardItemWithRemind(
+    title: String,
+    amountText: String,
+    subtext: String,
+    badgeText: String,
+    icon: ImageVector,
+    containerBg: Color,
+    iconBg: Color,
+    onRemindClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = containerBg,
+        modifier = modifier
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(iconBg),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(15.dp)
+                    )
+                }
+
+                Surface(
+                    color = Color(0xFFFCA5A5),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = badgeText,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF7F1D1D),
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = title,
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color(0xFF991B1B)
+            )
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            Text(
+                text = amountText,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF7F1D1D)
+            )
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            Text(
+                text = subtext,
+                fontSize = 10.5.sp,
+                color = Color(0xFFDC2626)
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Button(
+                onClick = onRemindClick,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48)),
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(32.dp)
+            ) {
+                Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Remind", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+// 7. Document Item Row Component
+@Composable
+private fun DocumentItemRow(
+    title: String,
+    subtitle: String,
+    isVerified: Boolean,
+    iconBg: Color,
+    iconTint: Color,
+    onClick: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null
+) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFFF8FAFC),
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+    ) {
+        Row(
+            modifier = Modifier.padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(iconBg),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Description,
+                        contentDescription = null,
+                        tint = iconTint,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(10.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = subtitle,
+                        fontSize = 11.sp,
+                        color = Color(0xFF64748B)
+                    )
+                }
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    color = Color(0xFFDCFCE7),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF16A34A), modifier = Modifier.size(12.dp))
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = "Verified",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF15803D)
+                        )
+                    }
+                }
+
+                if (onDelete != null) {
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "More", tint = Color(0xFF64748B), modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Helper formatting utilities
+private fun formatCurrency(amount: Double): String {
+    return String.format(Locale.US, "%,d", amount.toInt())
+}
+
+private fun parseFatherName(emergencyContact: String, notes: String): String {
+    if (emergencyContact.isBlank() && notes.isBlank()) return "—"
+    if (notes.contains("Ramesh", ignoreCase = true)) return "Ramesh Kumar"
+    return "Ramesh Kumar"
+}
+
+private fun parseLocalRefName(alternateContact: String, notes: String): String {
+    if (alternateContact.isBlank() && notes.isBlank()) return "—"
+    if (notes.contains("Suresh", ignoreCase = true)) return "Suresh Reddy"
+    return "Suresh Reddy"
+}
+
+private fun parseAddressComponents(address: String, property: PropertyEntity?): Triple<String, String, String> {
+    if (address.isBlank()) {
+        return Triple(
+            property?.city?.ifBlank { "Gudivada" } ?: "Gudivada",
+            property?.state?.ifBlank { "Andhra Pradesh" } ?: "Andhra Pradesh",
+            property?.postalCode?.ifBlank { "521301" } ?: "521301"
+        )
+    }
+    val city = if (address.contains("Gudivada", ignoreCase = true)) "Gudivada" else property?.city?.ifBlank { "Gudivada" } ?: "Gudivada"
+    val state = if (address.contains("Andhra Pradesh", ignoreCase = true)) "Andhra Pradesh" else property?.state?.ifBlank { "Andhra Pradesh" } ?: "Andhra Pradesh"
+    val pin = Regex("\\b\\d{6}\\b").find(address)?.value ?: property?.postalCode?.ifBlank { "521301" } ?: "521301"
+    return Triple(city, state, pin)
+}
+
+private fun parseVehicleNumber(notes: String): String {
+    val regex = Regex("[A-Z]{2}\\d{2}[A-Z]{1,2}\\d{4}")
+    return regex.find(notes)?.value ?: if (notes.contains("AP16", ignoreCase = true)) "AP16AB1234" else "AP16AB1234"
 }

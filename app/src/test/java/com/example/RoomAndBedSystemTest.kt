@@ -7,6 +7,8 @@ import com.example.data.database.*
 import com.example.features.rooms.data.repository.RoomRepositoryImpl
 import com.example.features.rooms.domain.model.*
 import com.example.features.rooms.domain.repository.RoomRepository
+import com.example.features.rooms.domain.usecase.UpdateRoomUseCase
+import com.example.features.rooms.domain.usecase.ValidateRoomUseCase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -133,5 +135,156 @@ class RoomAndBedSystemTest {
         assertNotNull(newAssignment)
         assertNull(newAssignment?.endDate)
         assertEquals("2026-10-15", newAssignment?.startDate)
+    }
+
+    @Test
+    fun testRoomCapacitySaveBlockInvariant() = runTest(testDispatcher) {
+        val propId = "property_default"
+        val validateUseCase = ValidateRoomUseCase(repository)
+        val updateRoomUseCase = UpdateRoomUseCase(repository, validateUseCase)
+
+        // 1. Create Room 101 with capacity 3
+        val initialRoom = RoomEntity(
+            roomNumber = "101",
+            floor = "1st Floor",
+            capacity = 3,
+            ratePerBed = 6000.0,
+            roomType = "Non-AC",
+            propertyId = propId
+        )
+        repository.insertRoom(initialRoom)
+
+        // 2. Add two active tenants to Room 101
+        val t1Id = tenantDao.insertTenant(
+            TenantEntity(
+                name = "Tenant One",
+                phone = "1111111111",
+                email = "t1@test.com",
+                emergencyContact = "999",
+                roomNumber = "101",
+                bedId = "Bed 1",
+                monthlyRent = 6000.0,
+                securityDeposit = 6000.0,
+                moveInDate = "2026-10-01",
+                isKycUploaded = false,
+                kycDocType = "None",
+                propertyId = propId
+            )
+        ).toInt()
+
+        val t2Id = tenantDao.insertTenant(
+            TenantEntity(
+                name = "Tenant Two",
+                phone = "2222222222",
+                email = "t2@test.com",
+                emergencyContact = "999",
+                roomNumber = "101",
+                bedId = "Bed 2",
+                monthlyRent = 6000.0,
+                securityDeposit = 6000.0,
+                moveInDate = "2026-10-01",
+                isKycUploaded = false,
+                kycDocType = "None",
+                propertyId = propId
+            )
+        ).toInt()
+
+        bedAssignmentDao.insertAssignment(
+            BedAssignmentEntity(
+                tenantId = t1Id,
+                roomNumber = "101",
+                bedId = "Bed 1",
+                startDate = "2026-10-01",
+                agreedRent = 6000.0,
+                propertyId = propId
+            )
+        )
+        bedAssignmentDao.insertAssignment(
+            BedAssignmentEntity(
+                tenantId = t2Id,
+                roomNumber = "101",
+                bedId = "Bed 2",
+                startDate = "2026-10-01",
+                agreedRent = 6000.0,
+                propertyId = propId
+            )
+        )
+
+        // Verify active tenants count in Room 101 is 2
+        val activeTenants = repository.getTenantsInRoom("101")
+        assertEquals(2, activeTenants.size)
+
+        // 3. Attempting to reduce capacity to 1 (less than active occupancy 2) MUST BE REJECTED
+        val rejectResult = updateRoomUseCase(
+            roomNumber = "101",
+            floor = "1st Floor",
+            capacity = 1,
+            ratePerBed = 6000.0,
+            roomType = "Non-AC",
+            notes = "Attempted shrink"
+        )
+        assertTrue(rejectResult is RoomValidationResult.Error)
+        assertEquals(
+            "Bed capacity cannot be reduced below current active tenants count (2).",
+            (rejectResult as RoomValidationResult.Error).message
+        )
+
+        // 4. Verify existing room in database remains COMPLETELY UNCHANGED after rejection
+        val roomAfterReject = repository.getRoom("101")
+        assertNotNull(roomAfterReject)
+        assertEquals(3, roomAfterReject?.capacity)
+        assertEquals("1st Floor", roomAfterReject?.floor)
+
+        // 5. Reducing capacity to 2 (at or above current active occupancy of 2) MUST SUCCEED
+        val successResult = updateRoomUseCase(
+            roomNumber = "101",
+            floor = "1st Floor",
+            capacity = 2,
+            ratePerBed = 6000.0,
+            roomType = "Non-AC",
+            notes = "Valid shrink"
+        )
+        assertTrue(successResult is RoomValidationResult.Success)
+
+        val roomAfterValidShrink = repository.getRoom("101")
+        assertEquals(2, roomAfterValidShrink?.capacity)
+        assertEquals("Valid shrink", roomAfterValidShrink?.notes)
+
+        // 6. Historical inactive assignments do not count as active occupancy
+        // Vacate Tenant Two
+        val vacateResult = repository.vacateTenant(t2Id, "2026-10-05")
+        assertTrue(vacateResult is RoomValidationResult.Success)
+
+        // Active tenants count in Room 101 is now 1 (Tenant Two's historical assignment exists in bed_assignments table)
+        val activeAfterVacate = repository.getTenantsInRoom("101")
+        assertEquals(1, activeAfterVacate.size)
+
+        val allRoomAssignments = bedAssignmentDao.getAssignmentsForRoom(propId, "101")
+        assertTrue(allRoomAssignments.size >= 2) // Historical assignments exist
+
+        // Now reducing capacity to 1 (matching remaining active tenant count 1) MUST SUCCEED
+        val reduceTo1Result = updateRoomUseCase(
+            roomNumber = "101",
+            floor = "1st Floor",
+            capacity = 1,
+            ratePerBed = 6000.0,
+            roomType = "Non-AC",
+            notes = "Shrunk after vacate"
+        )
+        assertTrue(reduceTo1Result is RoomValidationResult.Success)
+        assertEquals(1, repository.getRoom("101")?.capacity)
+
+        // 7. Legitimate boundary: Attempting capacity 0 or negative is rejected by validation
+        val zeroCapacityResult = updateRoomUseCase(
+            roomNumber = "101",
+            floor = "1st Floor",
+            capacity = 0,
+            ratePerBed = 6000.0,
+            roomType = "Non-AC",
+            notes = "Zero capacity"
+        )
+        assertTrue(zeroCapacityResult is RoomValidationResult.Error)
+        // Room remains unchanged at capacity 1
+        assertEquals(1, repository.getRoom("101")?.capacity)
     }
 }

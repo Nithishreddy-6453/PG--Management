@@ -72,4 +72,10 @@ abstract class GoogleFormsBindingModule {
     abstract fun bindPendingTenantRegistrationRepository(
         impl: com.example.features.googleform.data.repository.PendingTenantRegistrationRepositoryImpl
     ): com.example.features.googleform.domain.repository.PendingTenantRegistrationRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindFormAccessRequestRepository(
+        impl: com.example.features.googleform.data.repository.FormAccessRequestRepositoryImpl
+    ): com.example.features.googleform.domain.repository.FormAccessRequestRepository
 }

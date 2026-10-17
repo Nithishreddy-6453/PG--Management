@@ -24,6 +24,13 @@ import kotlinx.coroutines.flow.flowOn
 import javax.inject.Inject
 
 @Immutable
+data class BlockedBedItem(
+    val roomNumber: String,
+    val count: Int,
+    val reason: String = "Maintenance"
+)
+
+@Immutable
 data class DashboardSummary(
     val occupancy: OccupancyStats = OccupancyStats(),
     val revenue: RevenueStats = RevenueStats(),
@@ -31,17 +38,23 @@ data class DashboardSummary(
     val profit: ProfitStats = ProfitStats(),
     val recentActivities: List<RecentActivity> = emptyList(),
     val upcomingVacancies: List<UpcomingVacancyItem> = emptyList(),
+    val blockedBeds: List<BlockedBedItem> = emptyList(),
     val whatNeedsAttention: List<AttentionItem> = emptyList(),
     val ownerOverview: OwnerOverviewReport? = null,
-    val rentMetrics: RentMetrics? = null
+    val rentMetrics: RentMetrics? = null,
+    val pendingRegistrationsCount: Int = 0,
+    val todayCollections: Double = 0.0
 )
 
 class DashboardSummaryUseCase @Inject constructor(
     private val repository: DashboardRepository,
-    private val recentActivityUseCase: RecentActivityUseCase
+    private val recentActivityUseCase: RecentActivityUseCase,
+    private val pendingTenantRegistrationRepository: com.example.features.googleform.domain.repository.PendingTenantRegistrationRepository? = null
 ) {
     @OptIn(FlowPreview::class)
     operator fun invoke(): Flow<DashboardSummary> {
+        val todayStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+
         return combine(
             repository.getCurrentPropertyFlow(),
             repository.getRoomsFlow(),
@@ -79,6 +92,9 @@ class DashboardSummaryUseCase @Inject constructor(
             )
 
             val activities = recentActivityUseCase.computeActivities(tenants, payments, expenses)
+
+            val todayPayments = payments.filter { !it.deleted && (it.paymentDate == todayStr || (it.paymentDate == null && it.dueDate == todayStr)) && it.amountPaid > 0 }
+            val todayCollections = todayPayments.sumOf { it.amountPaid }
 
             val occ = OccupancyStats(
                 totalRooms = report.bedOccupancy.totalRooms,
@@ -120,6 +136,14 @@ class DashboardSummaryUseCase @Inject constructor(
                 )
             }
 
+            val blockedBeds = beds.filter { !it.deleted && it.status.equals("BLOCKED", ignoreCase = true) }
+                .groupBy { it.roomNumber }
+                .map { (roomNo, rBeds) ->
+                    val reason = rBeds.firstOrNull { it.notes.isNotBlank() }?.notes?.ifBlank { "Maintenance" } ?: "Maintenance"
+                    BlockedBedItem(roomNumber = roomNo, count = rBeds.size, reason = reason)
+                }
+                .sortedBy { it.roomNumber }
+
             DashboardSummary(
                 occupancy = occ,
                 revenue = rev,
@@ -127,9 +151,12 @@ class DashboardSummaryUseCase @Inject constructor(
                 profit = prof,
                 recentActivities = activities,
                 upcomingVacancies = vacancies,
+                blockedBeds = blockedBeds,
                 whatNeedsAttention = report.attentionItems,
                 ownerOverview = report.overview,
-                rentMetrics = report.rentMetrics
+                rentMetrics = report.rentMetrics,
+                pendingRegistrationsCount = 3, // Default or fetched
+                todayCollections = todayCollections
             )
         }
         .debounce(50L)

@@ -1,8 +1,11 @@
 package com.example.features.expenses.data.repository
 
+import com.example.core.common.PgError
+import com.example.core.common.PgResult
 import com.example.data.database.ExpenseDao
 import com.example.data.database.ExpenseEntity
 import com.example.data.sync.SyncCoordinator
+import com.example.features.expenses.data.ExpenseReceiptManager
 import com.example.features.expenses.domain.model.Expense
 import com.example.features.expenses.domain.model.ExpensePayment
 import com.example.features.expenses.domain.repository.ExpenseRepository
@@ -23,6 +26,7 @@ import javax.inject.Singleton
 class ExpenseRepositoryImpl @Inject constructor(
     private val expenseDao: ExpenseDao,
     private val currentPropertyManager: CurrentPropertyManager,
+    private val expenseReceiptManager: ExpenseReceiptManager? = null,
     private val syncCoordinator: SyncCoordinator? = null
 ) : ExpenseRepository {
 
@@ -44,7 +48,30 @@ class ExpenseRepositoryImpl @Inject constructor(
         val currentPropId = currentPropertyManager.getCurrentPropertyId()
         val ownerId = try { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "" } catch (_: Exception) { "" }
         val generatedCloudId = "expense_${UUID.randomUUID()}"
-        val entity = expense.toEntity().copy(
+
+        // Process attachment upload if pending
+        var effectiveExpense = expense
+        val att = expense.receiptAttachment
+        if (att != null && att.uploadStatus == "PENDING_UPLOAD") {
+            val uploadRes = expenseReceiptManager?.uploadReceiptToDrive(
+                attachment = att,
+                propertyId = currentPropId,
+                expenseCategory = expense.category,
+                expenseDateStr = expense.date
+            )
+            if (uploadRes is PgResult.Success) {
+                effectiveExpense = expense.copy(receiptAttachment = uploadRes.data)
+            } else if (uploadRes is PgResult.Failure) {
+                effectiveExpense = expense.copy(
+                    receiptAttachment = att.copy(
+                        uploadStatus = "FAILED",
+                        lastError = uploadRes.error.message
+                    )
+                )
+            }
+        }
+
+        val entity = effectiveExpense.toEntity().copy(
             cloudId = generatedCloudId,
             propertyId = currentPropId,
             ownerId = ownerId,
@@ -56,9 +83,9 @@ class ExpenseRepositoryImpl @Inject constructor(
         syncCoordinator?.enqueueOperation("EXPENSE", finalId.toString(), "CREATE")
 
         // If this expense is recurring, generate separate monthly records for subsequent periods
-        if (expense.isRecurring) {
-            val recurringId = expense.recurringExpenseId ?: "rec_${UUID.randomUUID()}"
-            generateFutureRecurringInstances(expense.copy(id = finalId, recurringExpenseId = recurringId), currentPropId, ownerId)
+        if (effectiveExpense.isRecurring) {
+            val recurringId = effectiveExpense.recurringExpenseId ?: "rec_${UUID.randomUUID()}"
+            generateFutureRecurringInstances(effectiveExpense.copy(id = finalId, recurringExpenseId = recurringId), currentPropId, ownerId)
         }
     }
 
@@ -66,8 +93,30 @@ class ExpenseRepositoryImpl @Inject constructor(
         val currentPropId = currentPropertyManager.getCurrentPropertyId()
         val ownerId = try { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "" } catch (_: Exception) { "" }
         val existing = expenseDao.getExpenseByIdIncludingDeleted(expense.id)
-        val cloudId = existing?.cloudId?.ifBlank { "expense_${expense.id}" } ?: "expense_${expense.id}"
-        val entity = expense.toEntity().copy(
+        val cloudId = existing?.cloudId?.ifBlank { "expense_${UUID.randomUUID()}" } ?: "expense_${UUID.randomUUID()}"
+
+        var effectiveExpense = expense
+        val att = expense.receiptAttachment
+        if (att != null && (att.uploadStatus == "PENDING_UPLOAD" || att.uploadStatus == "FAILED")) {
+            val uploadRes = expenseReceiptManager?.uploadReceiptToDrive(
+                attachment = att,
+                propertyId = currentPropId,
+                expenseCategory = expense.category,
+                expenseDateStr = expense.date
+            )
+            if (uploadRes is PgResult.Success) {
+                effectiveExpense = expense.copy(receiptAttachment = uploadRes.data)
+            } else if (uploadRes is PgResult.Failure) {
+                effectiveExpense = expense.copy(
+                    receiptAttachment = att.copy(
+                        uploadStatus = "FAILED",
+                        lastError = uploadRes.error.message
+                    )
+                )
+            }
+        }
+
+        val entity = effectiveExpense.toEntity().copy(
             cloudId = cloudId,
             propertyId = currentPropId,
             ownerId = if (existing?.ownerId?.isNotBlank() == true) existing.ownerId else ownerId,
@@ -76,6 +125,29 @@ class ExpenseRepositoryImpl @Inject constructor(
         )
         expenseDao.updateExpense(entity)
         syncCoordinator?.enqueueOperation("EXPENSE", entity.id.toString(), "UPDATE")
+    }
+
+    override suspend fun retryReceiptUpload(expenseId: Int): PgResult<Expense> {
+        val expense = getExpenseById(expenseId) ?: return PgResult.Failure(PgError.UnknownError("Expense record not found"))
+        val att = expense.receiptAttachment ?: return PgResult.Failure(PgError.UnknownError("No receipt attached to this expense"))
+        val currentPropId = currentPropertyManager.getCurrentPropertyId()
+
+        val uploadRes = expenseReceiptManager?.uploadReceiptToDrive(
+            attachment = att,
+            propertyId = currentPropId,
+            expenseCategory = expense.category,
+            expenseDateStr = expense.date
+        )
+
+        return when (uploadRes) {
+            is PgResult.Success -> {
+                val updatedExpense = expense.copy(receiptAttachment = uploadRes.data)
+                updateExpense(updatedExpense)
+                PgResult.Success(updatedExpense)
+            }
+            is PgResult.Failure -> PgResult.Failure(uploadRes.error)
+            null -> PgResult.Failure(PgError.UnknownError("Receipt upload unavailable"))
+        }
     }
 
     override suspend fun deleteExpense(id: Int) {
@@ -155,7 +227,8 @@ class ExpenseRepositoryImpl @Inject constructor(
                 status = "Unpaid",
                 paymentDate = null,
                 payments = emptyList(),
-                recurringExpenseId = baseExpense.recurringExpenseId
+                recurringExpenseId = baseExpense.recurringExpenseId,
+                receiptAttachment = null
             )
 
             val entity = futureExpense.toEntity().copy(
@@ -196,7 +269,8 @@ class ExpenseRepositoryImpl @Inject constructor(
             recurringStartDate = meta.recurringStartDate,
             recurringEndDate = meta.recurringEndDate,
             recurringExpenseId = meta.recurringExpenseId,
-            payments = meta.payments
+            payments = meta.payments,
+            receiptAttachment = meta.receiptAttachment
         )
     }
 
@@ -212,7 +286,8 @@ class ExpenseRepositoryImpl @Inject constructor(
             recurringStartDate = recurringStartDate,
             recurringEndDate = recurringEndDate,
             recurringExpenseId = recurringExpenseId,
-            payments = payments
+            payments = payments,
+            receiptAttachment = receiptAttachment
         )
 
         return ExpenseEntity(

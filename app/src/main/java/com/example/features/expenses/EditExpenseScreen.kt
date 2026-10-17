@@ -257,6 +257,112 @@ fun EditExpenseScreen(
                         shape = RoundedCornerShape(12.dp)
                     )
 
+                    // Receipt Attachment Section
+                    val editFilePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+                        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+                    ) { uri: android.net.Uri? ->
+                        uri?.let {
+                            viewModel.onEvent(EditExpenseUiEvent.AttachReceiptUri(it, source = "UPLOAD"))
+                        }
+                    }
+
+                    val editTempCameraUri = remember {
+                        try {
+                            val tempFile = java.io.File(context.cacheDir, "scan_bill_${System.currentTimeMillis()}.jpg")
+                            androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", tempFile)
+                        } catch (_: Exception) { null }
+                    }
+
+                    val editCameraLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+                        contract = androidx.activity.result.contract.ActivityResultContracts.TakePicture()
+                    ) { success: Boolean ->
+                        if (success && editTempCameraUri != null) {
+                            viewModel.onEvent(EditExpenseUiEvent.AttachReceiptUri(editTempCameraUri, mimeType = "image/jpeg", source = "SCAN"))
+                        }
+                    }
+
+                    Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth().testTag("edit_expense_receipt_card")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(
+                                text = rememberTranslation("Bill / Receipt Attachment"),
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                            )
+
+                            if (uiState.isPreparingAttachment) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Preparing attachment...", style = MaterialTheme.typography.bodySmall)
+                                }
+                            } else if (uiState.selectedAttachment != null) {
+                                val att = uiState.selectedAttachment!!
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(10.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = att.fileName,
+                                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                maxLines = 1
+                                            )
+                                            Text(
+                                                text = "${att.mimeType} • ${att.uploadStatus}",
+                                                style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            )
+                                        }
+                                        IconButton(onClick = { viewModel.onEvent(EditExpenseUiEvent.RemoveReceipt) }) {
+                                            Icon(
+                                                imageVector = androidx.compose.material.icons.Icons.Default.CalendarToday,
+                                                contentDescription = "Remove",
+                                                tint = MaterialTheme.colorScheme.error
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { editFilePickerLauncher.launch("*/*") },
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(10.dp)
+                                    ) {
+                                        Text(rememberTranslation("Upload File"))
+                                    }
+                                    Button(
+                                        onClick = { editTempCameraUri?.let { editCameraLauncher.launch(it) } },
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED))
+                                    ) {
+                                        Text(rememberTranslation("Scan Bill"))
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Button(

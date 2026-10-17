@@ -35,6 +35,134 @@ service cloud.firestore {
         request.resource.data.ownerId == resource.data.ownerId;
     }
 
+    // SEC-3A: Financial field validation
+    function isValidPaymentData(data) {
+      return data != null &&
+        data.amount is number && data.amount >= 0 &&
+        data.amountPaid is number && data.amountPaid >= 0 &&
+        (!('status' in data) || (data.status is string && data.status in ['Pending', 'Paid', 'Partially Paid', 'Partial', 'Overdue', 'Overpaid']));
+    }
+
+    function isValidExpenseData(data) {
+      return data != null &&
+        data.amount is number && data.amount >= 0;
+    }
+
+    // SEC-3C: Tenant, Room, and Property validation
+    function isValidTenantData(data) {
+      return data != null &&
+        data.monthlyRent is number && data.monthlyRent >= 0 &&
+        data.securityDeposit is number && data.securityDeposit >= 0 &&
+        (!('advancePaid' in data) || (data.advancePaid is number && data.advancePaid >= 0)) &&
+        data.propertyId is string && data.propertyId.size() > 0 &&
+        (!('cloudId' in data) || (data.cloudId is string && data.cloudId.size() > 0));
+    }
+
+    function isValidRoomData(data) {
+      return data != null &&
+        data.capacity is number && data.capacity >= 0 &&
+        data.ratePerBed is number && data.ratePerBed >= 0 &&
+        data.roomNumber is string && data.roomNumber.size() > 0 &&
+        data.propertyId is string && data.propertyId.size() > 0;
+    }
+
+    function isValidPropertyData(data) {
+      return data != null &&
+        (!('id' in data) || (data.id is string && data.id.size() > 0)) &&
+        ((('propertyName' in data) && data.propertyName is string && data.propertyName.size() > 0) ||
+         (('pgName' in data) && data.pgName is string && data.pgName.size() > 0)) &&
+        (!('totalFloors' in data) || (data.totalFloors is number && data.totalFloors >= 0)) &&
+        (!('totalRooms' in data) || (data.totalRooms is number && data.totalRooms >= 0));
+    }
+
+    // SEC-3D1: Pending Tenant Registration and Form validation
+    function isValidRegistrationFormData(data) {
+      return data != null &&
+        data.propertyId is string && data.propertyId.size() > 0 &&
+        (!('formId' in data) || data.formId is string) &&
+        (!('active' in data) || data.active is bool) &&
+        (!('published' in data) || data.published is bool) &&
+        (!('formVersion' in data) || (data.formVersion is number && data.formVersion >= 0)) &&
+        (!('createdAt' in data) || data.createdAt is number) &&
+        (!('updatedAt' in data) || data.updatedAt is number);
+    }
+
+    function isValidPendingRegistrationData(data) {
+      return data != null &&
+        data.propertyId is string && data.propertyId.size() > 0 &&
+        (!('formId' in data) || data.formId is string) &&
+        (!('cloudId' in data) || (data.cloudId is string && data.cloudId.size() > 0)) &&
+        (!('fullName' in data) || data.fullName is string) &&
+        (!('phone' in data) || data.phone is string) &&
+        (!('status' in data) || (data.status is string && data.status in ['PENDING', 'NEEDS_REVIEW', 'DUPLICATE', 'ACCEPTING', 'ACCEPTED', 'REJECTED'])) &&
+        (!('submittedAt' in data) || data.submittedAt is number) &&
+        (!('createdAt' in data) || data.createdAt is number) &&
+        (!('updatedAt' in data) || data.updatedAt is number) &&
+        (!('reviewedAt' in data) || data.reviewedAt is number);
+    }
+
+    // SEC-3E1: Reports validation
+    function isValidReportData(data) {
+      return data != null &&
+        (!('reportPeriod' in data) || data.reportPeriod is string) &&
+        (!('totalRevenue' in data) || (data.totalRevenue is number && data.totalRevenue >= 0)) &&
+        (!('totalExpenses' in data) || (data.totalExpenses is number && data.totalExpenses >= 0)) &&
+        (!('netProfit' in data) || data.netProfit is number) &&
+        (!('outstandingRent' in data) || (data.outstandingRent is number && data.outstandingRent >= 0)) &&
+        (!('collectionRate' in data) || (data.collectionRate is number && data.collectionRate >= 0)) &&
+        (!('occupancyRate' in data) || (data.occupancyRate is number && data.occupancyRate >= 0)) &&
+        (!('generatedAt' in data) || data.generatedAt is number) &&
+        (!('createdAt' in data) || data.createdAt is number) &&
+        (!('updatedAt' in data) || data.updatedAt is number) &&
+        (!('version' in data) || (data.version is number && data.version >= 0)) &&
+        (!('deleted' in data) || data.deleted is bool);
+    }
+
+    // SEC-3E1: Settings validation
+    function isValidSettingsData(data) {
+      return data != null &&
+        (!('defaultMonthlyRent' in data) || (data.defaultMonthlyRent is number && data.defaultMonthlyRent >= 0)) &&
+        (!('defaultSecurityDeposit' in data) || (data.defaultSecurityDeposit is number && data.defaultSecurityDeposit >= 0)) &&
+        (!('defaultRentDueDay' in data) || (data.defaultRentDueDay is int && data.defaultRentDueDay >= 1 && data.defaultRentDueDay <= 31)) &&
+        (!('theme' in data) || (data.theme is string && data.theme in ['SYSTEM', 'LIGHT', 'DARK'])) &&
+        (!('currency' in data) || data.currency is string) &&
+        (!('dynamicColor' in data) || data.dynamicColor is bool) &&
+        (!('biometricEnabled' in data) || data.biometricEnabled is bool) &&
+        (!('rentDueReminder' in data) || data.rentDueReminder is bool) &&
+        (!('createdAt' in data) || data.createdAt is number) &&
+        (!('updatedAt' in data) || data.updatedAt is number) &&
+        (!('version' in data) || (data.version is number && data.version >= 0)) &&
+        (!('deleted' in data) || data.deleted is bool);
+    }
+
+    // SEC-3E1: Tenant Media validation
+    function isValidTenantMediaData(data) {
+      return data != null &&
+        data.tenantCloudId is string && data.tenantCloudId.size() > 0 &&
+        (!('propertyId' in data) || data.propertyId is string) &&
+        (!('cloudId' in data) || (data.cloudId is string && data.cloudId.size() > 0)) &&
+        (!('driveFileId' in data) || data.driveFileId is string) &&
+        (!('driveFolderId' in data) || data.driveFolderId is string) &&
+        (!('driveTenantFolderId' in data) || data.driveTenantFolderId is string) &&
+        (!('drivePhotosFolderId' in data) || data.drivePhotosFolderId is string) &&
+        (!('fileName' in data) || data.fileName is string) &&
+        (!('mimeType' in data) || data.mimeType is string) &&
+        (!('sizeBytes' in data) || (data.sizeBytes is number && data.sizeBytes >= 0)) &&
+        (!('mediaType' in data) || (data.mediaType is string && data.mediaType in ['PROFILE_PHOTO', 'ID_PROOF', 'TENANT_DOCUMENT', 'DOCUMENT'])) &&
+        (!('status' in data) || (data.status is string && data.status in ['ACTIVE', 'DELETED'])) &&
+        (!('createdAt' in data) || data.createdAt is number) &&
+        (!('updatedAt' in data) || data.updatedAt is number) &&
+        (!('deleted' in data) || data.deleted is bool);
+    }
+
+    // SEC-3E1: Drive Folder Mappings validation
+    function isValidDriveFolderMappingData(data) {
+      return data != null &&
+        data.folderPathKey is string && data.folderPathKey.size() > 0 &&
+        data.driveFolderId is string && data.driveFolderId.size() > 0 &&
+        (!('updatedAt' in data) || data.updatedAt is number);
+    }
+
     // User Profile Document (keyed by Firebase Auth UID)
     match /users/{userId} {
       allow read, write: if isAuthenticated() && request.auth.uid == userId;
@@ -43,78 +171,86 @@ service cloud.firestore {
     // Properties Collection
     match /properties/{propertyId} {
       allow read, delete: if isOwnerReadOrDelete();
-      allow create: if isOwnerCreate();
-      allow update: if isOwnerUpdate();
+      allow create: if isOwnerCreate() && isValidPropertyData(request.resource.data);
+      allow update: if isOwnerUpdate() && isValidPropertyData(request.resource.data);
     }
 
     // Rooms Collection
     match /rooms/{roomId} {
       allow read, delete: if isOwnerReadOrDelete();
-      allow create: if isOwnerCreate();
-      allow update: if isOwnerUpdate();
+      allow create: if isOwnerCreate() && isValidRoomData(request.resource.data);
+      allow update: if isOwnerUpdate() && isValidRoomData(request.resource.data);
     }
 
     // Tenants Collection
     match /tenants/{tenantId} {
       allow read, delete: if isOwnerReadOrDelete();
-      allow create: if isOwnerCreate();
-      allow update: if isOwnerUpdate();
+      allow create: if isOwnerCreate() && isValidTenantData(request.resource.data);
+      allow update: if isOwnerUpdate() && isValidTenantData(request.resource.data);
     }
 
     // Payments Collection
     match /payments/{paymentId} {
       allow read, delete: if isOwnerReadOrDelete();
-      allow create: if isOwnerCreate();
-      allow update: if isOwnerUpdate();
+      allow create: if isOwnerCreate() && isValidPaymentData(request.resource.data);
+      allow update: if isOwnerUpdate() && isValidPaymentData(request.resource.data);
     }
 
     // Expenses Collection
     match /expenses/{expenseId} {
       allow read, delete: if isOwnerReadOrDelete();
-      allow create: if isOwnerCreate();
-      allow update: if isOwnerUpdate();
+      allow create: if isOwnerCreate() && isValidExpenseData(request.resource.data);
+      allow update: if isOwnerUpdate() && isValidExpenseData(request.resource.data);
     }
 
     // Reports Collection
     match /reports/{reportId} {
       allow read, delete: if isOwnerReadOrDelete();
-      allow create: if isOwnerCreate();
-      allow update: if isOwnerUpdate();
+      allow create: if isOwnerCreate() && isValidReportData(request.resource.data);
+      allow update: if isOwnerUpdate() && isValidReportData(request.resource.data);
     }
 
     // Settings Collection
     match /settings/{settingId} {
       allow read, delete: if isOwnerReadOrDelete();
-      allow create: if isOwnerCreate();
-      allow update: if isOwnerUpdate();
+      allow create: if isOwnerCreate() && isValidSettingsData(request.resource.data);
+      allow update: if isOwnerUpdate() && isValidSettingsData(request.resource.data);
     }
 
     // Tenant Media Collection (Canonical Profile Photos & Documents)
     match /tenant_media/{mediaId} {
       allow read, delete: if isOwnerReadOrDelete();
-      allow create: if isOwnerCreate();
-      allow update: if isOwnerUpdate();
+      allow create: if isOwnerCreate() && isValidTenantMediaData(request.resource.data);
+      allow update: if isOwnerUpdate() && isValidTenantMediaData(request.resource.data);
     }
 
     // Drive Folder Mappings Collection
     match /drive_folder_mappings/{mappingId} {
       allow read, delete: if isOwnerReadOrDelete();
-      allow create: if isOwnerCreate();
-      allow update: if isOwnerUpdate();
+      allow create: if isOwnerCreate() && mappingId == request.resource.data.folderPathKey && isValidDriveFolderMappingData(request.resource.data);
+      allow update: if isOwnerUpdate() && mappingId == request.resource.data.folderPathKey && isValidDriveFolderMappingData(request.resource.data);
     }
 
     // Tenant Registration Forms Collection
     match /tenant_registration_forms/{formId} {
       allow read, delete: if isOwnerReadOrDelete();
-      allow create: if isOwnerCreate();
-      allow update: if isOwnerUpdate();
+      allow create: if isOwnerCreate() && isValidRegistrationFormData(request.resource.data);
+      allow update: if isOwnerUpdate() && isValidRegistrationFormData(request.resource.data);
+    }
+
+    function isValidPendingRegistrationUpdate(prev, next) {
+      return isValidPendingRegistrationData(next) &&
+        // Prevent terminal state regression: ACCEPTED cannot change to non-ACCEPTED, REJECTED cannot change to non-REJECTED
+        (!(prev.status in ['ACCEPTED', 'REJECTED']) || next.status == prev.status) &&
+        // If already ACCEPTED, createdTenantCloudId must not be cleared
+        (prev.status != 'ACCEPTED' || (!('createdTenantCloudId' in prev) || prev.createdTenantCloudId == '' || next.createdTenantCloudId == prev.createdTenantCloudId));
     }
 
     // Pending Tenant Registrations Collection
     match /pending_tenant_registrations/{regId} {
       allow read, delete: if isOwnerReadOrDelete();
-      allow create: if isOwnerCreate();
-      allow update: if isOwnerUpdate();
+      allow create: if isOwnerCreate() && isValidPendingRegistrationData(request.resource.data);
+      allow update: if isOwnerUpdate() && isValidPendingRegistrationUpdate(resource.data, request.resource.data);
     }
   }
 }

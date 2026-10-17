@@ -10,6 +10,7 @@ data class TenantMediaDto(
     @get:PropertyName("propertyId") @set:PropertyName("propertyId") var propertyId: String = "",
     @get:PropertyName("tenantCloudId") @set:PropertyName("tenantCloudId") var tenantCloudId: String = "",
     @get:PropertyName("driveFileId") @set:PropertyName("driveFileId") var driveFileId: String = "",
+    @get:PropertyName("fileUrl") @set:PropertyName("fileUrl") var fileUrl: String = "",
     @get:PropertyName("driveTenantFolderId") @set:PropertyName("driveTenantFolderId") var driveTenantFolderId: String = "",
     @get:PropertyName("drivePhotosFolderId") @set:PropertyName("drivePhotosFolderId") var drivePhotosFolderId: String = "",
     @get:PropertyName("fileName") @set:PropertyName("fileName") var fileName: String = "",
@@ -17,9 +18,25 @@ data class TenantMediaDto(
     @get:PropertyName("sizeBytes") @set:PropertyName("sizeBytes") var sizeBytes: Long = 0L,
     @get:PropertyName("mediaType") @set:PropertyName("mediaType") var mediaType: String = "PROFILE_PHOTO",
     @get:PropertyName("status") @set:PropertyName("status") var status: String = "ACTIVE",
+    @get:PropertyName("verificationStatus") @set:PropertyName("verificationStatus") var verificationStatus: String = "VERIFIED",
     @get:PropertyName("driveFolderId") @set:PropertyName("driveFolderId") var driveFolderId: String = "",
     @get:PropertyName("createdAt") @set:PropertyName("createdAt") var createdAt: Long = 0L,
     @get:PropertyName("updatedAt") @set:PropertyName("updatedAt") var updatedAt: Long = 0L,
     @get:PropertyName("deleted") @set:PropertyName("deleted") var deleted: Boolean = false,
     @get:PropertyName("lastModifiedByDeviceId") @set:PropertyName("lastModifiedByDeviceId") var lastModifiedByDeviceId: String = ""
-)
+) {
+    @get:PropertyName("id")
+    val id: String get() = cloudId
+    @PropertyName("id")
+    fun setIdValue(v: String) { if (cloudId.isBlank()) cloudId = v }
+
+    @get:PropertyName("tenantId")
+    val tenantId: String get() = tenantCloudId
+    @PropertyName("tenantId")
+    fun setTenantIdValue(v: String) { if (tenantCloudId.isBlank()) tenantCloudId = v }
+
+    @get:PropertyName("uploadedAt")
+    val uploadedAt: Long get() = if (createdAt > 0) createdAt else updatedAt
+    @PropertyName("uploadedAt")
+    fun setUploadedAtValue(v: Long) { if (createdAt <= 0) createdAt = v; if (updatedAt <= 0) updatedAt = v }
+}

@@ -14,6 +14,7 @@ plugins {
 android {
   namespace = "com.example"
   compileSdk = 35
+  buildToolsVersion = "36.0.0"
 
   defaultConfig {
     applicationId = "com.aistudio.pgmanager.vxlmqz"

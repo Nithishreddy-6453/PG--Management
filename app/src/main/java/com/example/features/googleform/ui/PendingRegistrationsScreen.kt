@@ -194,6 +194,27 @@ fun PendingRegistrationsScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = { viewModel.syncResponses() },
+                        enabled = !uiState.isSyncing,
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("top_bar_sync_button")
+                    ) {
+                        if (uiState.isSyncing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Color(0xFF0077ED),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = getNewRegistrationsText,
+                                tint = Color(0xFF0077ED)
+                            )
+                        }
+                    }
                     com.example.core.language.GlobalLanguageToggle(
                         modifier = Modifier.padding(end = 8.dp)
                     )
@@ -202,6 +223,38 @@ fun PendingRegistrationsScreen(
                     containerColor = Color.White
                 ),
                 modifier = Modifier.testTag("pending_registrations_top_bar")
+            )
+        },
+        floatingActionButton = {
+            androidx.compose.material3.ExtendedFloatingActionButton(
+                onClick = { viewModel.syncResponses() },
+                containerColor = Color(0xFF0077ED),
+                contentColor = Color.White,
+                icon = {
+                    if (uiState.isSyncing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                            tint = Color.White
+                        )
+                    }
+                },
+                text = {
+                    Text(
+                        text = if (uiState.isSyncing) syncingText else getNewRegistrationsText,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White
+                    )
+                },
+                modifier = Modifier.testTag("fab_sync_submissions")
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -346,6 +399,72 @@ fun PendingRegistrationsScreen(
                     onClick = { viewModel.onSelectTab(RegistrationFilterTab.ACCEPTED) },
                     modifier = Modifier.weight(1f).testTag("tab_accepted")
                 )
+            }
+
+            // Submissions Header with Direct "Get New Submissions" Button
+            Surface(
+                color = Color.White,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                modifier = Modifier.fillMaxWidth().testTag("submissions_action_bar")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = when (uiState.selectedTab) {
+                                RegistrationFilterTab.PENDING_REVIEW -> "$needsReviewText (${uiState.pendingCount})"
+                                RegistrationFilterTab.ALL -> "$allText (${uiState.totalCount})"
+                                RegistrationFilterTab.ACCEPTED -> "$approvedText (${uiState.acceptedCount})"
+                                RegistrationFilterTab.REJECTED -> "Rejected (${uiState.rejectedCount})"
+                            },
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = Color(0xFF1E293B)
+                        )
+                        Text(
+                            text = if (uiState.isSyncing) syncingText else "Fetch latest Google Form entries",
+                            fontSize = 11.5.sp,
+                            color = Color(0xFF64748B)
+                        )
+                    }
+
+                    Button(
+                        onClick = { viewModel.syncResponses() },
+                        enabled = !uiState.isSyncing,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF0077ED),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.testTag("sync_new_submissions_button")
+                    ) {
+                        if (uiState.isSyncing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color = Color.White,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(syncingText, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = Color.White
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(getNewRegistrationsText, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                        }
+                    }
+                }
             }
 
             // Registrations List or Empty State
@@ -864,6 +983,40 @@ fun RegistrationCardItem(
                             imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                             contentDescription = null,
                             modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+
+            // Onboarded info badge if Accepted
+            if (registration.isAccepted) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Surface(
+                    color = Color(0xFFF0FDF4),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, Color(0xFFBBF7D0)),
+                    modifier = Modifier.fillMaxWidth().testTag("onboarded_banner_${registration.cloudId}")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFF16A34A),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (registration.duplicateMatchedTenantRoom.isNotBlank()) {
+                                "Onboarded as Active Tenant in Room ${registration.duplicateMatchedTenantRoom}"
+                            } else {
+                                "Approved & Onboarded as Tenant"
+                            },
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF15803D)
                         )
                     }
                 }

@@ -1,9 +1,12 @@
 package com.example.features.rent.data.repository
 
+import androidx.room.withTransaction
+import com.example.data.database.AppDatabase
 import com.example.data.database.PropertyDao
 import com.example.data.database.RentPaymentDao
 import com.example.data.database.RentPaymentEntity
 import com.example.data.database.TenantDao
+import com.example.data.database.TenantEntity
 import com.example.data.sync.SyncCoordinator
 import com.example.features.excel.data.ExcelDriveBackupManager
 import com.example.features.properties.data.CurrentPropertyManager
@@ -31,6 +34,7 @@ class RentRepositoryImpl @Inject constructor(
     private val propertyDao: PropertyDao,
     private val currentPropertyManager: CurrentPropertyManager,
     private val currentBillingMonthManager: CurrentBillingMonthManager,
+    private val appDatabase: AppDatabase,
     private val syncCoordinator: SyncCoordinator? = null,
     private val excelDriveBackupManager: ExcelDriveBackupManager? = null
 ) : RentRepository {
@@ -50,76 +54,84 @@ class RentRepositoryImpl @Inject constructor(
         val parsedMonth = RentBillingEngine.parseBillingMonth(payment.billingMonth)
         val canonicalMonth = parsedMonth.canonicalName
 
-        // Find if an existing active payment already exists using stable identity
-        val existingPayment: RentPaymentEntity? = when {
-            payment.id > 0 -> rentPaymentDao.getPaymentByIdIncludingDeleted(payment.id)
-            payment.cloudId.isNotBlank() -> rentPaymentDao.getPaymentByCloudIdIncludingDeleted(payment.cloudId)
-            payment.tenantId > 0 && canonicalMonth.isNotBlank() -> {
-                rentPaymentDao.getPaymentForTenantPropertyAndMonth(payment.tenantId, currentPropId, canonicalMonth)
-                    ?: rentPaymentDao.getPaymentForTenantAndMonth(payment.tenantId, canonicalMonth)
+        appDatabase.withTransaction {
+            // Find if an existing active payment already exists using stable identity
+            val existingPayment: RentPaymentEntity? = when {
+                payment.id > 0 -> rentPaymentDao.getPaymentByIdIncludingDeleted(payment.id)
+                payment.cloudId.isNotBlank() -> rentPaymentDao.getPaymentByCloudIdIncludingDeleted(payment.cloudId)
+                payment.tenantId > 0 && canonicalMonth.isNotBlank() -> {
+                    rentPaymentDao.getPaymentForTenantPropertyAndMonth(payment.tenantId, currentPropId, canonicalMonth)
+                        ?: rentPaymentDao.getPaymentForTenantAndMonth(payment.tenantId, canonicalMonth)
+                        ?: rentPaymentDao.getPaymentsForTenantSync(payment.tenantId).find {
+                            RentBillingEngine.parseBillingMonth(it.billingMonth).canonicalName == canonicalMonth && !it.deleted
+                        }
+                }
+                payment.tenantName.isNotBlank() && canonicalMonth.isNotBlank() -> {
+                    rentPaymentDao.getPaymentForTenantNamePropertyAndMonth(payment.tenantName, currentPropId, canonicalMonth)
+                        ?: rentPaymentDao.getPaymentsForPropertyAndMonth(currentPropId, canonicalMonth).find {
+                            it.tenantName.trim().equals(payment.tenantName.trim(), ignoreCase = true) && !it.deleted
+                        }
+                }
+                else -> null
             }
-            payment.tenantName.isNotBlank() && canonicalMonth.isNotBlank() -> {
-                rentPaymentDao.getPaymentForTenantNamePropertyAndMonth(payment.tenantName, currentPropId, canonicalMonth)
-            }
-            else -> null
-        }
 
-        if (existingPayment != null && !existingPayment.deleted) {
-            val expectedAmount = if (payment.amount > 0) payment.amount else existingPayment.amount
-            val amountPaid = payment.amountPaid
-            val calculatedStatus = RentBillingEngine.calculatePaymentStatus(
-                expectedAmount = expectedAmount,
-                amountPaid = amountPaid,
-                dueDateStr = payment.dueDate.ifBlank { existingPayment.dueDate }
-            )
-
-            val updated = existingPayment.copy(
-                tenantName = payment.tenantName.ifBlank { existingPayment.tenantName },
-                roomNumber = payment.roomNumber.ifBlank { existingPayment.roomNumber },
-                billingMonth = canonicalMonth,
-                amount = expectedAmount,
-                amountPaid = amountPaid,
-                dueDate = payment.dueDate.ifBlank { existingPayment.dueDate },
-                paymentDate = payment.paymentDate ?: existingPayment.paymentDate,
-                paymentMode = payment.paymentMode ?: existingPayment.paymentMode,
-                transactionReference = payment.transactionReference ?: existingPayment.transactionReference,
-                remarks = payment.remarks ?: existingPayment.remarks,
-                status = calculatedStatus,
-                ownerId = if (existingPayment.ownerId.isNotBlank()) existingPayment.ownerId else ownerId,
-                propertyId = if (existingPayment.propertyId.isNotBlank() && existingPayment.propertyId != "property_default") existingPayment.propertyId else currentPropId,
-                updatedAt = System.currentTimeMillis(),
-                syncStatus = "PENDING_UPLOAD"
-            )
-            rentPaymentDao.updatePayment(updated)
-            syncCoordinator?.enqueueOperation("PAYMENT", updated.id.toString(), "UPDATE")
-        } else {
-            val calculatedStatus = RentBillingEngine.calculatePaymentStatus(
-                expectedAmount = payment.amount,
-                amountPaid = payment.amountPaid,
-                dueDateStr = payment.dueDate
-            )
-
-            val deterministicCloudId = if (payment.cloudId.isNotBlank()) {
-                payment.cloudId
-            } else {
-                RentBillingEngine.generateDeterministicCloudId(
-                    propertyId = currentPropId,
-                    tenantId = payment.tenantId,
-                    billingMonth = canonicalMonth
+            if (existingPayment != null && !existingPayment.deleted) {
+                val expectedAmount = if (payment.amount > 0) payment.amount else existingPayment.amount
+                val amountPaid = payment.amountPaid
+                val calculatedStatus = RentBillingEngine.calculatePaymentStatus(
+                    expectedAmount = expectedAmount,
+                    amountPaid = amountPaid,
+                    dueDateStr = payment.dueDate.ifBlank { existingPayment.dueDate }
                 )
-            }
 
-            val toInsert = payment.copy(
-                cloudId = deterministicCloudId,
-                billingMonth = canonicalMonth,
-                status = calculatedStatus,
-                ownerId = if (payment.ownerId.isNotBlank()) payment.ownerId else ownerId,
-                propertyId = if (payment.propertyId.isNotBlank() && payment.propertyId != "property_default") payment.propertyId else currentPropId,
-                updatedAt = System.currentTimeMillis(),
-                syncStatus = "PENDING_UPLOAD"
-            )
-            val insertedId = rentPaymentDao.insertPayment(toInsert)
-            syncCoordinator?.enqueueOperation("PAYMENT", insertedId.toString(), "CREATE")
+                val updated = existingPayment.copy(
+                    tenantName = payment.tenantName.ifBlank { existingPayment.tenantName },
+                    roomNumber = payment.roomNumber.ifBlank { existingPayment.roomNumber },
+                    billingMonth = canonicalMonth,
+                    amount = expectedAmount,
+                    amountPaid = amountPaid,
+                    dueDate = payment.dueDate.ifBlank { existingPayment.dueDate },
+                    paymentDate = payment.paymentDate ?: existingPayment.paymentDate,
+                    paymentMode = payment.paymentMode ?: existingPayment.paymentMode,
+                    transactionReference = payment.transactionReference ?: existingPayment.transactionReference,
+                    remarks = payment.remarks ?: existingPayment.remarks,
+                    status = calculatedStatus,
+                    ownerId = if (existingPayment.ownerId.isNotBlank()) existingPayment.ownerId else ownerId,
+                    propertyId = if (existingPayment.propertyId.isNotBlank() && existingPayment.propertyId != "property_default") existingPayment.propertyId else currentPropId,
+                    updatedAt = System.currentTimeMillis(),
+                    syncStatus = "PENDING_UPLOAD"
+                )
+                rentPaymentDao.updatePayment(updated)
+                syncCoordinator?.enqueueOperation("PAYMENT", updated.id.toString(), "UPDATE")
+            } else {
+                val calculatedStatus = RentBillingEngine.calculatePaymentStatus(
+                    expectedAmount = payment.amount,
+                    amountPaid = payment.amountPaid,
+                    dueDateStr = payment.dueDate
+                )
+
+                val deterministicCloudId = if (payment.cloudId.isNotBlank()) {
+                    payment.cloudId
+                } else {
+                    RentBillingEngine.generateDeterministicCloudId(
+                        propertyId = currentPropId,
+                        tenantId = payment.tenantId,
+                        billingMonth = canonicalMonth
+                    )
+                }
+
+                val toInsert = payment.copy(
+                    cloudId = deterministicCloudId,
+                    billingMonth = canonicalMonth,
+                    status = calculatedStatus,
+                    ownerId = if (payment.ownerId.isNotBlank()) payment.ownerId else ownerId,
+                    propertyId = if (payment.propertyId.isNotBlank() && payment.propertyId != "property_default") payment.propertyId else currentPropId,
+                    updatedAt = System.currentTimeMillis(),
+                    syncStatus = "PENDING_UPLOAD"
+                )
+                val insertedId = rentPaymentDao.insertPayment(toInsert)
+                syncCoordinator?.enqueueOperation("PAYMENT", insertedId.toString(), "CREATE")
+            }
         }
 
         excelDriveBackupManager?.triggerAsyncBackup(currentPropId, "payment_recorded")
@@ -135,29 +147,32 @@ class RentRepositoryImpl @Inject constructor(
     ) {
         val currentPropId = currentPropertyManager.getCurrentPropertyId()
         val ownerId = getCurrentOwnerId()
-        val existing = rentPaymentDao.getPaymentByIdIncludingDeleted(paymentId) ?: return
 
-        val newTotalPaid = existing.amountPaid + paidAmountDelta
-        val calculatedStatus = RentBillingEngine.calculatePaymentStatus(
-            expectedAmount = existing.amount,
-            amountPaid = newTotalPaid,
-            dueDateStr = existing.dueDate
-        )
+        appDatabase.withTransaction {
+            val existing = rentPaymentDao.getPaymentByIdIncludingDeleted(paymentId) ?: return@withTransaction
 
-        val updated = existing.copy(
-            amountPaid = newTotalPaid,
-            paymentDate = paymentDate.ifBlank { SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) },
-            paymentMode = paymentMode.ifBlank { "UPI" },
-            transactionReference = transactionReference ?: existing.transactionReference,
-            remarks = remarks ?: existing.remarks,
-            status = calculatedStatus,
-            ownerId = if (existing.ownerId.isNotBlank()) existing.ownerId else ownerId,
-            propertyId = if (existing.propertyId.isNotBlank() && existing.propertyId != "property_default") existing.propertyId else currentPropId,
-            updatedAt = System.currentTimeMillis(),
-            syncStatus = "PENDING_UPLOAD"
-        )
-        rentPaymentDao.updatePayment(updated)
-        syncCoordinator?.enqueueOperation("PAYMENT", updated.id.toString(), "UPDATE")
+            val newTotalPaid = existing.amountPaid + paidAmountDelta
+            val calculatedStatus = RentBillingEngine.calculatePaymentStatus(
+                expectedAmount = existing.amount,
+                amountPaid = newTotalPaid,
+                dueDateStr = existing.dueDate
+            )
+
+            val updated = existing.copy(
+                amountPaid = newTotalPaid,
+                paymentDate = paymentDate.ifBlank { SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) },
+                paymentMode = paymentMode.ifBlank { "UPI" },
+                transactionReference = transactionReference ?: existing.transactionReference,
+                remarks = remarks ?: existing.remarks,
+                status = calculatedStatus,
+                ownerId = if (existing.ownerId.isNotBlank()) existing.ownerId else ownerId,
+                propertyId = if (existing.propertyId.isNotBlank() && existing.propertyId != "property_default") existing.propertyId else currentPropId,
+                updatedAt = System.currentTimeMillis(),
+                syncStatus = "PENDING_UPLOAD"
+            )
+            rentPaymentDao.updatePayment(updated)
+            syncCoordinator?.enqueueOperation("PAYMENT", updated.id.toString(), "UPDATE")
+        }
         excelDriveBackupManager?.triggerAsyncBackup(currentPropId, "payment_transaction")
     }
 
@@ -167,8 +182,10 @@ class RentRepositoryImpl @Inject constructor(
 
     override suspend fun deletePayment(id: Int) {
         val currentPropId = currentPropertyManager.getCurrentPropertyId()
-        rentPaymentDao.softDeletePayment(id)
-        syncCoordinator?.enqueueOperation("PAYMENT", id.toString(), "DELETE")
+        appDatabase.withTransaction {
+            rentPaymentDao.softDeletePayment(id)
+            syncCoordinator?.enqueueOperation("PAYMENT", id.toString(), "DELETE")
+        }
         excelDriveBackupManager?.triggerAsyncBackup(currentPropId, "payment_deleted")
     }
 
@@ -211,10 +228,6 @@ class RentRepositoryImpl @Inject constructor(
             } catch (_: Exception) {}
         }
 
-        val tenants = tenantDao.getAllTenants(currentPropId)
-        val existingPayments = rentPaymentDao.getPaymentsForPropertyAndMonth(currentPropId, canonicalMonth)
-        val existingTenantIds = existingPayments.filter { !it.deleted }.map { it.tenantId }.toSet()
-
         val finalDueDate = if (dueDateStr.isNotBlank()) {
             dueDateStr
         } else {
@@ -227,56 +240,69 @@ class RentRepositoryImpl @Inject constructor(
             SimpleDateFormat("yyyy-MM-dd", Locale.US).format(cal.time)
         }
 
-        for (tenant in tenants.filter { !it.deleted && it.roomNumber.isNotBlank() }) {
-            // Check if tenant already has an active record for this billing month
-            if (existingTenantIds.contains(tenant.id)) {
-                continue
-            }
+        var allTenantsSnapshot: List<TenantEntity> = emptyList()
 
-            val proration = RentBillingEngine.calculateProrationDetails(
-                moveInDateStr = tenant.moveInDate,
-                leavingDateStr = tenant.leavingDate,
-                billingMonthStr = canonicalMonth
-            )
+        appDatabase.withTransaction {
+            val tenants = tenantDao.getAllTenants(currentPropId)
+            allTenantsSnapshot = tenants
+            val existingPayments = rentPaymentDao.getPaymentsForPropertyAndMonth(currentPropId, canonicalMonth)
+            val existingTenantIds = existingPayments.filter { !it.deleted }.map { it.tenantId }.toSet()
 
-            // Only generate record if tenant has applicable days this month
-            if (proration.applicableDays > 0) {
-                val expectedRent = RentBillingEngine.calculateExpectedRent(
-                    monthlyRent = tenant.monthlyRent,
-                    applicableDays = proration.applicableDays,
-                    daysInMonth = proration.daysInMonth
+            for (tenant in tenants.filter { !it.deleted && it.roomNumber.isNotBlank() }) {
+                // Check if tenant already has an active record for this billing month
+                if (existingTenantIds.contains(tenant.id)) {
+                    continue
+                }
+
+                val proration = RentBillingEngine.calculateProrationDetails(
+                    moveInDateStr = tenant.moveInDate,
+                    leavingDateStr = tenant.leavingDate,
+                    billingMonthStr = canonicalMonth
                 )
 
-                val deterministicCloudId = RentBillingEngine.generateDeterministicCloudId(
-                    propertyId = currentPropId,
-                    tenantId = tenant.id,
-                    billingMonth = canonicalMonth
-                )
+                // Only generate record if tenant has applicable days this month
+                if (proration.applicableDays > 0) {
+                    val expectedRent = RentBillingEngine.calculateExpectedRent(
+                        monthlyRent = tenant.monthlyRent,
+                        applicableDays = proration.applicableDays,
+                        daysInMonth = proration.daysInMonth
+                    )
 
-                val newInvoice = RentPaymentEntity(
-                    cloudId = deterministicCloudId,
-                    tenantId = tenant.id,
-                    tenantName = tenant.name,
-                    roomNumber = tenant.roomNumber,
-                    billingMonth = canonicalMonth,
-                    amount = expectedRent,
-                    amountPaid = 0.0,
-                    dueDate = finalDueDate,
-                    paymentDate = null,
-                    paymentMode = null,
-                    status = "Pending",
-                    ownerId = ownerId,
-                    propertyId = currentPropId,
-                    syncStatus = "PENDING_UPLOAD",
-                    updatedAt = System.currentTimeMillis()
-                )
+                    val tenantCloudId = tenant.cloudId.ifBlank { tenant.id.toString() }
+                    val deterministicCloudId = RentBillingEngine.generateDeterministicCloudId(
+                        propertyId = currentPropId,
+                        tenantCloudId = tenantCloudId,
+                        billingMonth = canonicalMonth
+                    )
 
-                val insertedId = rentPaymentDao.insertPayment(newInvoice)
-                syncCoordinator?.enqueueOperation("PAYMENT", insertedId.toString(), "CREATE")
+                    val newInvoice = RentPaymentEntity(
+                        cloudId = deterministicCloudId,
+                        tenantId = tenant.id,
+                        tenantName = tenant.name,
+                        roomNumber = tenant.roomNumber,
+                        billingMonth = canonicalMonth,
+                        amount = expectedRent,
+                        amountPaid = 0.0,
+                        dueDate = finalDueDate,
+                        paymentDate = null,
+                        paymentMode = null,
+                        status = "Pending",
+                        ownerId = ownerId,
+                        propertyId = currentPropId,
+                        syncStatus = "PENDING_UPLOAD",
+                        updatedAt = System.currentTimeMillis()
+                    )
+
+                    val insertedId = rentPaymentDao.insertPayment(newInvoice)
+                    syncCoordinator?.enqueueOperation("PAYMENT", insertedId.toString(), "CREATE")
+                }
             }
         }
 
-        // Set the active billing month context to the newly generated month
+        // Trigger external sync scheduling only after the database transaction commits
+        syncCoordinator?.triggerImmediateSync()
+
+        // Set the active billing month context to the newly generated month after transaction commits
         currentBillingMonthManager.setCurrentBillingMonth(canonicalMonth)
         excelDriveBackupManager?.triggerAsyncBackup(currentPropId, "month_generated")
 
@@ -286,7 +312,7 @@ class RentRepositoryImpl @Inject constructor(
             propertyId = currentPropId,
             propertyName = propertyName,
             billingMonthStr = canonicalMonth,
-            allTenants = tenants,
+            allTenants = allTenantsSnapshot,
             existingMonthPayments = refreshedPayments
         )
     }
@@ -333,9 +359,10 @@ class RentRepositoryImpl @Inject constructor(
                     }
                     val defaultDueDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(cal.time)
 
+                    val tenantCloudId = tenant.cloudId.ifBlank { tenant.id.toString() }
                     val deterministicCloudId = RentBillingEngine.generateDeterministicCloudId(
                         propertyId = currentPropId,
-                        tenantId = tenant.id,
+                        tenantCloudId = tenantCloudId,
                         billingMonth = canonicalMonth
                     )
 

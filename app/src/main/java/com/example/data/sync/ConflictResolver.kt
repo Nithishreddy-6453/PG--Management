@@ -83,7 +83,8 @@ class ConflictResolver @Inject constructor(
 
         // Rule 5: Genuine concurrent conflict - both devices modified independently
         val isFromOtherDevice = remoteDeviceId.isNotBlank() && localDeviceId.isNotBlank() && remoteDeviceId != localDeviceId
-        if (remoteVersion >= localVersion || remoteUpdatedAt > localUpdatedAt || isFromOtherDevice) {
+        val isRemoteNewer = remoteVersion > localVersion || (remoteVersion == localVersion && remoteUpdatedAt > localUpdatedAt)
+        if (isFromOtherDevice && isRemoteNewer) {
             logger.w(
                 TAG,
                 "Concurrent conflict detected for $entityName: " +
@@ -100,9 +101,11 @@ class ConflictResolver @Inject constructor(
                 remoteUpdatedAt = remoteUpdatedAt,
                 remoteDeviceId = remoteDeviceId
             )
-        } else {
-            logger.i(TAG, "Local changes retained for $entityName: Local v$localVersion ($localUpdatedAt) > Remote v$remoteVersion ($remoteUpdatedAt)")
+        } else if (remoteVersion < localVersion || (remoteVersion == localVersion && localUpdatedAt >= remoteUpdatedAt)) {
+            logger.i(TAG, "Local changes retained for $entityName: Local v$localVersion ($localUpdatedAt) >= Remote v$remoteVersion ($remoteUpdatedAt)")
             return ConflictResult.UseLocal(localData)
+        } else {
+            return ConflictResult.UseRemote(remoteData)
         }
     }
 

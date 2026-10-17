@@ -460,51 +460,78 @@ fun AuthEmailScreen(
                                     )
                                 }
 
-                                if (isGoogleAccount) {
+                                if (!isSignUp) {
                                     Spacer(modifier = Modifier.height(10.dp))
-                                    Button(
-                                        onClick = { doGoogleSignIn() },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF111827)),
-                                        shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .testTag("auth_google_direct_button")
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        Text(
-                                            text = "Continue with Google →",
-                                            color = Color.White,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                } else if (!isSignUp && isNoAccountFound) {
-                                    Spacer(modifier = Modifier.height(10.dp))
-                                    Button(
-                                        onClick = {
-                                            isSignUp = true
-                                            focusManager.clearFocus()
-                                            val trimmedEmail = email.trim()
-                                            val rawPassword = password
-                                            if (trimmedEmail.isNotBlank() && rawPassword.length >= 6) {
-                                                viewModel.signUpWithEmail(trimmedEmail, rawPassword)
-                                            } else {
-                                                viewModel.resetState()
+                                        if (isGoogleAccount) {
+                                            Button(
+                                                onClick = { doGoogleSignIn() },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF111827)),
+                                                shape = RoundedCornerShape(8.dp),
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .testTag("auth_google_direct_button")
+                                            ) {
+                                                Text(
+                                                    text = "Continue with Google →",
+                                                    color = Color.White,
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
                                             }
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                                        shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .testTag("auth_create_account_instead_button")
-                                    ) {
-                                        Text(
-                                            text = "Create New Account Instead →",
-                                            color = Color.White,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
+                                        }
+
+                                        // Provide option to create account if credentials were not found or uncreated
+                                        OutlinedButton(
+                                            onClick = {
+                                                isSignUp = true
+                                                focusManager.clearFocus()
+                                                val trimmedEmail = email.trim()
+                                                val rawPassword = password
+                                                if (trimmedEmail.isNotBlank() && rawPassword.length >= 6) {
+                                                    viewModel.signUpWithEmail(trimmedEmail, rawPassword)
+                                                } else {
+                                                    viewModel.resetState()
+                                                }
+                                            },
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .testTag("auth_create_account_instead_button")
+                                        ) {
+                                            Text(
+                                                text = "Create New Account Instead →",
+                                                color = Color(0xFF2563EB),
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+
+                                        // Forgot password quick-reset option in error container
+                                        if (email.isNotBlank()) {
+                                            TextButton(
+                                                onClick = {
+                                                    focusManager.clearFocus()
+                                                    viewModel.sendPasswordResetEmail(email.trim())
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                                                modifier = Modifier
+                                                    .align(Alignment.CenterHorizontally)
+                                                    .testTag("auth_error_forgot_password_button")
+                                            ) {
+                                                Text(
+                                                    text = "Forgot password? Send reset link",
+                                                    color = Color(0xFF64748B),
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                            }
+                                        }
                                     }
                                 } else if (isSignUp && isEmailInUse) {
                                     Spacer(modifier = Modifier.height(10.dp))

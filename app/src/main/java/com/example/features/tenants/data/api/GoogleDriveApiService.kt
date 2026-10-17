@@ -5,6 +5,13 @@ import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.*
 
+data class CreatePermissionRequest(
+    val role: String = "reader",
+    val type: String = "anyone",
+    val emailAddress: String? = null,
+    val sendNotificationEmail: Boolean? = true
+)
+
 interface GoogleDriveApiService {
 
     @GET("https://www.googleapis.com/drive/v3/files")
@@ -27,6 +34,14 @@ interface GoogleDriveApiService {
         @Header("Content-Type") contentType: String,
         @Body body: RequestBody
     ): Response<DriveFileItem>
+
+    @POST("https://www.googleapis.com/drive/v3/files/{fileId}/permissions")
+    suspend fun createPermission(
+        @Header("Authorization") authHeader: String,
+        @Path("fileId") fileId: String,
+        @Query("sendNotificationEmail") sendNotificationEmail: Boolean = true,
+        @Body request: CreatePermissionRequest = CreatePermissionRequest()
+    ): Response<ResponseBody>
 
     @Streaming
     @GET("https://www.googleapis.com/drive/v3/files/{fileId}")

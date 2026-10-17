@@ -1,5 +1,6 @@
 package com.example.features.expenses
 
+import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -14,8 +15,12 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Receipt
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,6 +50,7 @@ fun ExpenseDetailsScreen(
 ) {
     val uiState by viewModel.state.collectAsState()
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
 
     var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -307,6 +313,188 @@ fun ExpenseDetailsScreen(
                                 if (expense.notes.isNotBlank()) {
                                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                                     DetailRow(label = rememberTranslation("Notes"), value = expense.notes)
+                                }
+                            }
+                        }
+
+                        // 4b. Attached Bill / Receipt Card
+                        expense.receiptAttachment?.let { att ->
+                            val coroutineScope = rememberCoroutineScope()
+                            Card(
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                                modifier = Modifier.fillMaxWidth().testTag("expense_receipt_card")
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector = Icons.Default.Receipt,
+                                                contentDescription = null,
+                                                tint = Color(0xFF0284C7),
+                                                modifier = Modifier.size(22.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = rememberTranslation("Attached Bill / Receipt"),
+                                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                            )
+                                        }
+
+                                        // Upload status badge
+                                        when (att.uploadStatus) {
+                                            "UPLOADED" -> Surface(
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = Color(0xFFDCFCE7)
+                                            ) {
+                                                Text(
+                                                    text = "Uploaded to Drive",
+                                                    style = MaterialTheme.typography.labelSmall.copy(color = Color(0xFF15803D), fontWeight = FontWeight.Bold),
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                                )
+                                            }
+                                            "FAILED" -> Surface(
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = Color(0xFFFEE2E2)
+                                            ) {
+                                                Text(
+                                                    text = "Upload Failed",
+                                                    style = MaterialTheme.typography.labelSmall.copy(color = Color(0xFFB91C1C), fontWeight = FontWeight.Bold),
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                                )
+                                            }
+                                            else -> Surface(
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = Color(0xFFFEF3C7)
+                                            ) {
+                                                Text(
+                                                    text = "Pending Upload",
+                                                    style = MaterialTheme.typography.labelSmall.copy(color = Color(0xFFB45309), fontWeight = FontWeight.Bold),
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(Color(0xFFF8FAFC), RoundedCornerShape(10.dp))
+                                            .padding(12.dp)
+                                    ) {
+                                        Text(
+                                            text = att.fileName.ifBlank { "Receipt Attachment" },
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold, color = Color(0xFF1E293B))
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = "${if (att.fileSize > 0) "${att.fileSize / 1024} KB • " else ""}${att.mimeType} • Source: ${att.source}",
+                                            style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFF64748B), fontSize = 11.sp)
+                                        )
+                                        if (!att.lastError.isNullOrBlank()) {
+                                            Text(
+                                                text = "Error: ${att.lastError}",
+                                                style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFFB91C1C), fontSize = 11.sp),
+                                                modifier = Modifier.padding(top = 4.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                coroutineScope.launch {
+                                                    val file = java.io.File(att.localFilePath)
+                                                    if (file.exists() && file.length() > 0) {
+                                                        try {
+                                                            val contentUri = androidx.core.content.FileProvider.getUriForFile(
+                                                                context,
+                                                                "${context.packageName}.fileprovider",
+                                                                file
+                                                            )
+                                                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                                                setDataAndType(contentUri, att.mimeType)
+                                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                            }
+                                                            context.startActivity(intent)
+                                                        } catch (e: Exception) {
+                                                            Toast.makeText(context, "No app available to open this file", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    } else if (att.driveFileId.isNotBlank()) {
+                                                        Toast.makeText(context, "Downloading receipt from Google Drive...", Toast.LENGTH_SHORT).show()
+                                                        val dlRes = viewModel.expenseReceiptManager.downloadReceiptFile(att.driveFileId, att.fileName)
+                                                        if (dlRes is com.example.core.common.PgResult.Success) {
+                                                            try {
+                                                                val downloadedFile = dlRes.data
+                                                                val contentUri = androidx.core.content.FileProvider.getUriForFile(
+                                                                    context,
+                                                                    "${context.packageName}.fileprovider",
+                                                                    downloadedFile
+                                                                )
+                                                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                                                    setDataAndType(contentUri, att.mimeType)
+                                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                                }
+                                                                context.startActivity(intent)
+                                                            } catch (e: Exception) {
+                                                                Toast.makeText(context, "Downloaded to device successfully", Toast.LENGTH_SHORT).show()
+                                                            }
+                                                        } else if (dlRes is com.example.core.common.PgResult.Failure) {
+                                                            Toast.makeText(context, "Failed to download receipt: ${dlRes.error.message}", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    } else {
+                                                        Toast.makeText(context, "File unavailable locally and on Drive", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(10.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Info,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(rememberTranslation("View Bill"))
+                                        }
+
+                                        if (att.uploadStatus == "FAILED" || att.uploadStatus == "PENDING_UPLOAD") {
+                                            Button(
+                                                onClick = {
+                                                    viewModel.onEvent(ExpenseDetailsUiEvent.RetryReceiptUpload)
+                                                },
+                                                modifier = Modifier.weight(1f),
+                                                shape = RoundedCornerShape(10.dp),
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
+                                            ) {
+                                                if (uiState.isRetryingUpload) {
+                                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                                                } else {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Refresh,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(rememberTranslation("Retry Upload"))
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

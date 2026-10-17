@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import androidx.room.withTransaction
+import com.example.core.util.PgDateUtil
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -73,9 +74,9 @@ class RoomRepositoryImpl @Inject constructor(
             ) { rooms, tenants, beds, assignments ->
                 val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
                 rooms.map { room ->
-                    val roomTenants = tenants.filter { it.roomNumber == room.roomNumber }
-                    val roomBeds = beds.filter { it.roomNumber == room.roomNumber }
-                    val roomAssignments = assignments.filter { it.roomNumber == room.roomNumber }
+                    val roomTenants = tenants.filter { com.example.features.rooms.domain.model.isSameRoomNumber(it.roomNumber, room.roomNumber) }
+                    val roomBeds = beds.filter { com.example.features.rooms.domain.model.isSameRoomNumber(it.roomNumber, room.roomNumber) }
+                    val roomAssignments = assignments.filter { com.example.features.rooms.domain.model.isSameRoomNumber(it.roomNumber, room.roomNumber) }
                     RoomSummary(
                         room = room,
                         tenants = roomTenants,
@@ -91,18 +92,24 @@ class RoomRepositoryImpl @Inject constructor(
     override fun getRoomSummaryFlow(roomNumber: String): Flow<RoomSummary?> {
         return currentPropertyManager.currentPropertyIdFlow.flatMapLatest { propId ->
             combine(
-                roomDao.getRoomFlow(propId, roomNumber),
-                tenantDao.getTenantsInRoomForPropertyFlow(propId, roomNumber),
-                bedDao.getBedsForRoomFlow(propId, roomNumber),
-                bedAssignmentDao.getAssignmentsForRoomFlow(propId, roomNumber)
-            ) { room, tenants, beds, assignments ->
+                roomDao.getRoomsForPropertyFlow(propId),
+                tenantDao.getAllTenantsForPropertyFlow(propId),
+                bedDao.getAllBedsForPropertyFlow(propId),
+                bedAssignmentDao.getAllAssignmentsFlow(propId)
+            ) { rooms, tenants, beds, assignments ->
                 val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-                room?.let {
+                val room = rooms.firstOrNull { com.example.features.rooms.domain.model.isSameRoomNumber(it.roomNumber, roomNumber) }
+                    ?: rooms.firstOrNull { it.roomNumber.contains(roomNumber.trim().removePrefix("Room "), ignoreCase = true) }
+
+                room?.let { r ->
+                    val roomTenants = tenants.filter { com.example.features.rooms.domain.model.isSameRoomNumber(it.roomNumber, r.roomNumber) }
+                    val roomBeds = beds.filter { com.example.features.rooms.domain.model.isSameRoomNumber(it.roomNumber, r.roomNumber) }
+                    val roomAssignments = assignments.filter { com.example.features.rooms.domain.model.isSameRoomNumber(it.roomNumber, r.roomNumber) }
                     RoomSummary(
-                        room = it,
-                        tenants = tenants,
-                        beds = beds,
-                        assignments = assignments,
+                        room = r,
+                        tenants = roomTenants,
+                        beds = roomBeds,
+                        assignments = roomAssignments,
                         currentDateStr = todayStr
                     )
                 }
@@ -172,32 +179,62 @@ class RoomRepositoryImpl @Inject constructor(
     ): RoomValidationResult {
         suspend fun executeAssign(): RoomValidationResult {
             val propId = currentPropertyManager.getCurrentPropertyId()
+            val room = roomDao.getRoom(propId, roomNumber) ?: return RoomValidationResult.Error("Room does not exist.")
+            val physicalBeds = bedDao.getBedsForRoom(propId, roomNumber).filter { !it.deleted }
             var bed = bedDao.getBed(propId, roomNumber, bedId)
             if (bed == null) {
-                // Auto-create bed if within room capacity
-                val room = roomDao.getRoom(propId, roomNumber) ?: return RoomValidationResult.Error("Room does not exist.")
-                val newBed = BedEntity(
-                    roomNumber = roomNumber,
-                    bedId = bedId,
-                    status = "AVAILABLE",
-                    propertyId = propId,
-                    createdAt = System.currentTimeMillis(),
-                    updatedAt = System.currentTimeMillis(),
-                    syncStatus = "PENDING_UPLOAD"
-                )
-                bedDao.insertBed(newBed)
-                bed = newBed
+                val existingMatch = physicalBeds.firstOrNull { com.example.core.util.BedIdentityUtil.matchesSameBed(it.bedId, bedId) }
+                if (existingMatch != null) {
+                    bed = existingMatch
+                } else {
+                    // Auto-create bed only if room has not yet reached capacity
+                    if (physicalBeds.size >= room.capacity) {
+                        return RoomValidationResult.Error("Bed $bedId does not exist in Room $roomNumber.")
+                    }
+                    val targetBedId = com.example.core.util.BedIdentityUtil.resolveAuthoritativeBedId(bedId, physicalBeds)
+                    val newBed = BedEntity(
+                        roomNumber = roomNumber,
+                        bedId = targetBedId,
+                        status = "AVAILABLE",
+                        propertyId = propId,
+                        createdAt = System.currentTimeMillis(),
+                        updatedAt = System.currentTimeMillis(),
+                        syncStatus = "PENDING_UPLOAD"
+                    )
+                    bedDao.insertBed(newBed)
+                    bed = newBed
+                }
             }
             if (bed.status == "BLOCKED") return RoomValidationResult.Error("Bed is blocked / out of service.")
 
+            val canonicalBedId = bed.bedId
             val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-            val activeAssignment = bedAssignmentDao.getActiveAssignmentForBed(propId, roomNumber, bedId, todayStr)
+            val currentAssignments = bedAssignmentDao.getAssignmentsForRoom(propId, roomNumber)
+            val activeAssignment = currentAssignments.firstOrNull { assign ->
+                !assign.deleted &&
+                com.example.core.util.BedIdentityUtil.matchesSameBed(assign.bedId, canonicalBedId) &&
+                (assign.startDate.isBlank() || !PgDateUtil.isDateFuture(assign.startDate, todayStr)) &&
+                (assign.endDate == null || PgDateUtil.isDateFuture(assign.endDate, todayStr))
+            }
             if (activeAssignment != null && activeAssignment.tenantId != tenantId) {
                 return RoomValidationResult.Error("Bed is already occupied by another tenant.")
             }
 
+            // Enforce room capacity: active tenants cannot exceed usable capacity
+            val activeAssignmentsInRoom = currentAssignments.filter { assign ->
+                !assign.deleted &&
+                (assign.startDate.isBlank() || !PgDateUtil.isDateFuture(assign.startDate, todayStr)) &&
+                (assign.endDate == null || PgDateUtil.isDateFuture(assign.endDate, todayStr)) &&
+                assign.tenantId != tenantId
+            }
+            val blockedBedsCount = physicalBeds.count { it.status == "BLOCKED" }
+            val usableCapacity = (room.capacity - blockedBedsCount).coerceAtLeast(0)
+            if (activeAssignmentsInRoom.size >= usableCapacity && activeAssignmentsInRoom.none { com.example.core.util.BedIdentityUtil.matchesSameBed(it.bedId, canonicalBedId) }) {
+                return RoomValidationResult.Error("Room $roomNumber is already at full capacity.")
+            }
+
             val tenantActiveAssignment = bedAssignmentDao.getActiveAssignmentForTenant(propId, tenantId, todayStr)
-            if (tenantActiveAssignment != null && (tenantActiveAssignment.roomNumber != roomNumber || tenantActiveAssignment.bedId != bedId)) {
+            if (tenantActiveAssignment != null && (tenantActiveAssignment.roomNumber != roomNumber || !com.example.core.util.BedIdentityUtil.matchesSameBed(tenantActiveAssignment.bedId, canonicalBedId))) {
                 return RoomValidationResult.Error("Tenant already occupies another bed ($tenantActiveAssignment.roomNumber / $tenantActiveAssignment.bedId).")
             }
 
@@ -205,7 +242,7 @@ class RoomRepositoryImpl @Inject constructor(
                 assignmentId = UUID.randomUUID().toString(),
                 tenantId = tenantId,
                 roomNumber = roomNumber,
-                bedId = bedId,
+                bedId = canonicalBedId,
                 startDate = startDate.ifBlank { todayStr },
                 endDate = null,
                 agreedRent = agreedRent,
@@ -214,18 +251,26 @@ class RoomRepositoryImpl @Inject constructor(
                 updatedAt = System.currentTimeMillis(),
                 syncStatus = "PENDING_UPLOAD"
             )
+            bedAssignmentDao.closeActiveAssignmentsForBedExcept(
+                propertyId = propId,
+                roomNumber = roomNumber,
+                bedId = canonicalBedId,
+                endDate = startDate.ifBlank { todayStr },
+                excludeAssignmentId = assignment.assignmentId,
+                updatedAt = System.currentTimeMillis()
+            )
             bedAssignmentDao.insertAssignment(assignment)
             syncCoordinator?.enqueueOperation("BED_ASSIGNMENT", assignment.assignmentId, "CREATE")
 
             bedDao.updateBed(bed.copy(status = "OCCUPIED", updatedAt = System.currentTimeMillis(), syncStatus = "PENDING_UPLOAD"))
-            syncCoordinator?.enqueueOperation("BED", "${propId}_${roomNumber}_$bedId", "UPDATE")
+            syncCoordinator?.enqueueOperation("BED", "${propId}_${roomNumber}_$canonicalBedId", "UPDATE")
 
             val tenant = tenantDao.getTenantById(tenantId)
             if (tenant != null) {
                 tenantDao.updateTenant(
                     tenant.copy(
                         roomNumber = roomNumber,
-                        bedId = bedId,
+                        bedId = canonicalBedId,
                         monthlyRent = if (agreedRent > 0) agreedRent else tenant.monthlyRent,
                         updatedAt = System.currentTimeMillis(),
                         syncStatus = "PENDING_UPLOAD"
@@ -252,30 +297,59 @@ class RoomRepositoryImpl @Inject constructor(
     ): RoomValidationResult {
         suspend fun executeTransfer(): RoomValidationResult {
             val propId = currentPropertyManager.getCurrentPropertyId()
+            val room = roomDao.getRoom(propId, newRoomNumber) ?: return RoomValidationResult.Error("Destination room does not exist.")
+            val physicalDestBeds = bedDao.getBedsForRoom(propId, newRoomNumber).filter { !it.deleted }
             var destBed = bedDao.getBed(propId, newRoomNumber, newBedId)
             if (destBed == null) {
-                val room = roomDao.getRoom(propId, newRoomNumber) ?: return RoomValidationResult.Error("Destination room does not exist.")
-                val newBed = BedEntity(
-                    roomNumber = newRoomNumber,
-                    bedId = newBedId,
-                    status = "AVAILABLE",
-                    propertyId = propId,
-                    createdAt = System.currentTimeMillis(),
-                    updatedAt = System.currentTimeMillis(),
-                    syncStatus = "PENDING_UPLOAD"
-                )
-                bedDao.insertBed(newBed)
-                destBed = newBed
+                val existingMatch = physicalDestBeds.firstOrNull { com.example.core.util.BedIdentityUtil.matchesSameBed(it.bedId, newBedId) }
+                if (existingMatch != null) {
+                    destBed = existingMatch
+                } else {
+                    if (physicalDestBeds.size >= room.capacity) {
+                        return RoomValidationResult.Error("Destination bed $newBedId does not exist in Room $newRoomNumber.")
+                    }
+                    val targetBedId = com.example.core.util.BedIdentityUtil.resolveAuthoritativeBedId(newBedId, physicalDestBeds)
+                    val newBed = BedEntity(
+                        roomNumber = newRoomNumber,
+                        bedId = targetBedId,
+                        status = "AVAILABLE",
+                        propertyId = propId,
+                        createdAt = System.currentTimeMillis(),
+                        updatedAt = System.currentTimeMillis(),
+                        syncStatus = "PENDING_UPLOAD"
+                    )
+                    bedDao.insertBed(newBed)
+                    destBed = newBed
+                }
             }
             if (destBed.status == "BLOCKED") return RoomValidationResult.Error("Destination bed is blocked.")
 
-            val activeDestAssignment = bedAssignmentDao.getActiveAssignmentForBed(propId, newRoomNumber, newBedId, transferDate)
+            val canonicalDestBedId = destBed.bedId
+            val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+            val effectiveTransferDate = transferDate.ifBlank { todayStr }
+            val destAssignments = bedAssignmentDao.getAssignmentsForRoom(propId, newRoomNumber)
+            val activeDestAssignment = destAssignments.firstOrNull { assign ->
+                !assign.deleted &&
+                com.example.core.util.BedIdentityUtil.matchesSameBed(assign.bedId, canonicalDestBedId) &&
+                (assign.startDate.isBlank() || !PgDateUtil.isDateFuture(assign.startDate, effectiveTransferDate)) &&
+                (assign.endDate == null || PgDateUtil.isDateFuture(assign.endDate, effectiveTransferDate))
+            }
             if (activeDestAssignment != null && activeDestAssignment.tenantId != tenantId) {
                 return RoomValidationResult.Error("Destination bed is already occupied.")
             }
 
-            val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-            val effectiveTransferDate = transferDate.ifBlank { todayStr }
+            // Enforce destination room capacity
+            val activeDestAssignmentsInRoom = destAssignments.filter { assign ->
+                !assign.deleted &&
+                (assign.startDate.isBlank() || !PgDateUtil.isDateFuture(assign.startDate, effectiveTransferDate)) &&
+                (assign.endDate == null || PgDateUtil.isDateFuture(assign.endDate, effectiveTransferDate)) &&
+                assign.tenantId != tenantId
+            }
+            val blockedDestBedsCount = physicalDestBeds.count { it.status == "BLOCKED" }
+            val usableDestCapacity = (room.capacity - blockedDestBedsCount).coerceAtLeast(0)
+            if (activeDestAssignmentsInRoom.size >= usableDestCapacity && activeDestAssignmentsInRoom.none { com.example.core.util.BedIdentityUtil.matchesSameBed(it.bedId, canonicalDestBedId) }) {
+                return RoomValidationResult.Error("Destination room $newRoomNumber is already at full capacity.")
+            }
             val currentAssignment = bedAssignmentDao.getActiveAssignmentForTenant(propId, tenantId, todayStr)
                 ?: bedAssignmentDao.getAssignmentsForTenant(propId, tenantId).lastOrNull { it.endDate == null || it.endDate >= todayStr }
 
@@ -290,7 +364,7 @@ class RoomRepositoryImpl @Inject constructor(
                 syncCoordinator?.enqueueOperation("BED_ASSIGNMENT", currentAssignment.assignmentId, "UPDATE")
 
                 val oldBed = bedDao.getBed(propId, currentAssignment.roomNumber, currentAssignment.bedId)
-                if (oldBed != null && (oldBed.roomNumber != newRoomNumber || oldBed.bedId != newBedId)) {
+                if (oldBed != null && (oldBed.roomNumber != newRoomNumber || !com.example.core.util.BedIdentityUtil.matchesSameBed(oldBed.bedId, canonicalDestBedId))) {
                     bedDao.updateBed(oldBed.copy(status = "AVAILABLE", updatedAt = System.currentTimeMillis(), syncStatus = "PENDING_UPLOAD"))
                     syncCoordinator?.enqueueOperation("BED", "${propId}_${currentAssignment.roomNumber}_${currentAssignment.bedId}", "UPDATE")
                 }
@@ -300,7 +374,7 @@ class RoomRepositoryImpl @Inject constructor(
                 assignmentId = UUID.randomUUID().toString(),
                 tenantId = tenantId,
                 roomNumber = newRoomNumber,
-                bedId = newBedId,
+                bedId = canonicalDestBedId,
                 startDate = effectiveTransferDate,
                 agreedRent = newAgreedRent,
                 propertyId = propId,
@@ -308,18 +382,26 @@ class RoomRepositoryImpl @Inject constructor(
                 updatedAt = System.currentTimeMillis(),
                 syncStatus = "PENDING_UPLOAD"
             )
+            bedAssignmentDao.closeActiveAssignmentsForBedExcept(
+                propertyId = propId,
+                roomNumber = newRoomNumber,
+                bedId = canonicalDestBedId,
+                endDate = effectiveTransferDate,
+                excludeAssignmentId = newAssignment.assignmentId,
+                updatedAt = System.currentTimeMillis()
+            )
             bedAssignmentDao.insertAssignment(newAssignment)
             syncCoordinator?.enqueueOperation("BED_ASSIGNMENT", newAssignment.assignmentId, "CREATE")
 
             bedDao.updateBed(destBed.copy(status = "OCCUPIED", updatedAt = System.currentTimeMillis(), syncStatus = "PENDING_UPLOAD"))
-            syncCoordinator?.enqueueOperation("BED", "${propId}_${newRoomNumber}_$newBedId", "UPDATE")
+            syncCoordinator?.enqueueOperation("BED", "${propId}_${newRoomNumber}_$canonicalDestBedId", "UPDATE")
 
             val tenant = tenantDao.getTenantById(tenantId)
             if (tenant != null) {
                 tenantDao.updateTenant(
                     tenant.copy(
                         roomNumber = newRoomNumber,
-                        bedId = newBedId,
+                        bedId = canonicalDestBedId,
                         monthlyRent = if (newAgreedRent > 0) newAgreedRent else tenant.monthlyRent,
                         updatedAt = System.currentTimeMillis(),
                         syncStatus = "PENDING_UPLOAD"

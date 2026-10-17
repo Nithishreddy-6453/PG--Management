@@ -24,7 +24,13 @@ sealed class Screen(val route: String) {
     object PaymentDetails : Screen("payment_details/{paymentId}") {
         fun createRoute(paymentId: Int) = "payment_details/$paymentId"
     }
-    object RecordPayment : Screen("record_payment")
+    object RecordPayment : Screen("record_payment/{tenantId}/{billingMonth}") {
+        fun createRoute(tenantId: Int? = null, billingMonth: String? = null): String {
+            val t = tenantId ?: 0
+            val b = android.net.Uri.encode(billingMonth ?: "")
+            return "record_payment/$t/$b"
+        }
+    }
     object EditPayment : Screen("edit_payment/{paymentId}") {
         fun createRoute(paymentId: Int) = "edit_payment/$paymentId"
     }
@@ -46,7 +52,10 @@ sealed class Screen(val route: String) {
     object ReportsRent : Screen("reports_rent")
     object ReportsOccupancy : Screen("reports_occupancy")
     object Settings : Screen("settings")
-    object AddTenant : Screen("add_tenant")
+    object AddTenantChoice : Screen("add_tenant_choice")
+    object AddTenant : Screen("add_tenant?registrationId={registrationId}") {
+        fun createRoute(registrationId: String? = null) = if (registrationId != null) "add_tenant?registrationId=$registrationId" else "add_tenant"
+    }
     object EditTenant : Screen("edit_tenant/{tenantId}") {
         fun createRoute(tenantId: Int) = "edit_tenant/$tenantId"
     }

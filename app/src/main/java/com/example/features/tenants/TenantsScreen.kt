@@ -37,10 +37,16 @@ import com.example.core.designsystem.MainTab
 import com.example.core.language.GlobalLanguageToggle
 import com.example.core.language.rememberTranslation
 import com.example.core.util.PgDateUtil
+import com.example.data.database.PropertyEntity
 import com.example.data.database.TenantEntity
+import com.example.features.properties.ui.components.AddPropertyDialog
+import com.example.features.properties.ui.components.EditPropertyDialog
+import com.example.features.properties.ui.components.PropertySelectorBottomSheet
+import com.example.features.properties.ui.viewmodel.PropertyViewModel
 import com.example.features.tenants.ui.viewmodel.TenantListUiState
 import com.example.features.tenants.ui.viewmodel.TenantListViewModel
 import com.example.navigation.Screen
+import androidx.hilt.navigation.compose.hiltViewModel
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -57,6 +63,13 @@ fun TenantsScreen(
     modifier: Modifier = Modifier
 ) {
     val state by viewModel.uiState.collectAsState()
+    val propertyViewModel: PropertyViewModel = hiltViewModel()
+    val properties by propertyViewModel.activeProperties.collectAsState()
+    val currentProperty by propertyViewModel.currentProperty.collectAsState()
+    val isLoadingProperties by propertyViewModel.isLoading.collectAsState()
+    var showPropertySheet by remember { mutableStateOf(false) }
+    var showAddPropertyDialog by remember { mutableStateOf(false) }
+    var propertyToEdit by remember { mutableStateOf<PropertyEntity?>(null) }
     var showSortMenu by remember { mutableStateOf(false) }
     var showRoomFilterMenu by remember { mutableStateOf(false) }
     var showFilterSheet by remember { mutableStateOf(false) }
@@ -109,6 +122,8 @@ fun TenantsScreen(
                         TenantsHeader(
                             titleText = titleText,
                             addTenantText = addTenantText,
+                            currentProperty = currentProperty,
+                            onSwitchProperty = { showPropertySheet = true },
                             onAddTenantClick = onAddTenantClick,
                             onNavigate = onNavigate,
                             onImportExcelClick = onImportExcelClick
@@ -139,6 +154,8 @@ fun TenantsScreen(
                         TenantsHeader(
                             titleText = titleText,
                             addTenantText = addTenantText,
+                            currentProperty = currentProperty,
+                            onSwitchProperty = { showPropertySheet = true },
                             onAddTenantClick = onAddTenantClick,
                             onNavigate = onNavigate,
                             onImportExcelClick = onImportExcelClick
@@ -275,12 +292,73 @@ fun TenantsScreen(
             }
         }
     }
+
+    if (showPropertySheet) {
+        PropertySelectorBottomSheet(
+            properties = properties,
+            currentProperty = currentProperty,
+            onSelectProperty = { prop ->
+                propertyViewModel.switchProperty(prop)
+                showPropertySheet = false
+            },
+            onAddNewProperty = {
+                showPropertySheet = false
+                showAddPropertyDialog = true
+            },
+            onDismiss = { showPropertySheet = false },
+            onEditProperty = { prop ->
+                showPropertySheet = false
+                propertyToEdit = prop
+            }
+        )
+    }
+
+    if (showAddPropertyDialog) {
+        AddPropertyDialog(
+            isOpen = showAddPropertyDialog,
+            isLoading = isLoadingProperties,
+            onDismiss = { showAddPropertyDialog = false },
+            onConfirm = { name, address, city, state, postalCode, phone, desc ->
+                propertyViewModel.createProperty(
+                    name = name,
+                    address = address,
+                    city = city,
+                    state = state,
+                    postalCode = postalCode,
+                    contactNumber = phone,
+                    description = desc,
+                    onSuccess = { showAddPropertyDialog = false }
+                )
+            }
+        )
+    }
+
+    if (propertyToEdit != null) {
+        EditPropertyDialog(
+            isOpen = true,
+            property = propertyToEdit,
+            isLoading = isLoadingProperties,
+            onDismiss = { propertyToEdit = null },
+            onSave = { updated ->
+                propertyViewModel.updateProperty(updated) {
+                    propertyToEdit = null
+                }
+            },
+            onArchive = { propId ->
+                propertyViewModel.archiveProperty(propId) {
+                    propertyToEdit = null
+                }
+            }
+        )
+    }
 }
 
 @Composable
 private fun TenantsHeader(
     titleText: String,
     addTenantText: String,
+    currentProperty: PropertyEntity?,
+    onSwitchProperty: () -> Unit,
     onAddTenantClick: () -> Unit,
     onNavigate: (String) -> Unit,
     onImportExcelClick: () -> Unit
@@ -291,78 +369,138 @@ private fun TenantsHeader(
         color = Color(0xFFF8FAFC),
         modifier = Modifier
             .fillMaxWidth()
-            .statusBarsPadding()
             .testTag("tenants_top_bar")
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            // Page Title
-            Text(
-                text = titleText,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF0F172A),
-                modifier = Modifier.testTag("tenants_screen_title")
-            )
-
-            Spacer(modifier = Modifier.weight(1f))
-
-            // Primary Header Action: + Add Tenant Button
-            Button(
-                onClick = onAddTenantClick,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                shape = RoundedCornerShape(12.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+            // Page Title and Property Switcher Pill
+            Column(
                 modifier = Modifier
-                    .height(38.dp)
-                    .testTag("add_tenant_button")
+                    .weight(1f, fill = false)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = addTenantText,
-                    fontSize = 13.sp,
+                    text = titleText,
+                    fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    color = Color(0xFF0F172A),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.testTag("tenants_screen_title")
                 )
+                if (currentProperty != null) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { onSwitchProperty() }
+                            .padding(vertical = 1.dp)
+                            .testTag("tenants_switch_property_chip")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Apartment,
+                            contentDescription = null,
+                            tint = Color(0xFF2563EB),
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = currentProperty.propertyName,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF2563EB),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowDown,
+                            contentDescription = "Switch Property",
+                            tint = Color(0xFF2563EB),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            // Language Selector
-            GlobalLanguageToggle()
-
-            Spacer(modifier = Modifier.width(4.dp))
-
-            // Overflow Menu
-            Box {
-                IconButton(
-                    onClick = { showOverflowMenu = true },
+            // Action Items Row
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.End
+            ) {
+                // Primary Header Action: + Add Tenant Button
+                Button(
+                    onClick = onAddTenantClick,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                     modifier = Modifier
-                        .size(36.dp)
-                        .testTag("tenants_overflow_button")
+                        .defaultMinSize(minHeight = 40.dp)
+                        .testTag("add_tenant_button")
                 ) {
                     Icon(
-                        imageVector = Icons.Default.MoreVert,
-                        contentDescription = "More Options",
-                        tint = Color(0xFF0F172A)
+                        imageVector = Icons.Default.Add,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = addTenantText,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        maxLines = 1
                     )
                 }
 
-                DropdownMenu(
-                    expanded = showOverflowMenu,
-                    onDismissRequest = { showOverflowMenu = false },
-                    modifier = Modifier.background(Color.White)
-                ) {
+                Spacer(modifier = Modifier.width(8.dp))
+
+                // Language Selector
+                GlobalLanguageToggle()
+
+                Spacer(modifier = Modifier.width(2.dp))
+
+                // Overflow Menu
+                Box {
+                    IconButton(
+                        onClick = { showOverflowMenu = true },
+                        modifier = Modifier
+                            .size(44.dp)
+                            .testTag("tenants_overflow_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "More Options",
+                            tint = Color(0xFF0F172A)
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = showOverflowMenu,
+                        onDismissRequest = { showOverflowMenu = false },
+                        modifier = Modifier.background(Color.White)
+                    ) {
+                    DropdownMenuItem(
+                        text = { Text("Switch PG / Property", fontSize = 14.sp) },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.SwapHoriz,
+                                contentDescription = null,
+                                tint = Color(0xFF2563EB)
+                            )
+                        },
+                        onClick = {
+                            showOverflowMenu = false
+                            onSwitchProperty()
+                        },
+                        modifier = Modifier.testTag("overflow_switch_property")
+                    )
                     DropdownMenuItem(
                         text = { Text("Pending Registrations", fontSize = 14.sp) },
                         leadingIcon = {
@@ -412,6 +550,7 @@ private fun TenantsHeader(
             }
         }
     }
+}
 }
 
 @Composable
@@ -950,8 +1089,11 @@ fun TenantCardItem(
 
     val cachedPhotoFile = remember(tenant.cloudId) {
         if (tenant.cloudId.isNotBlank()) {
-            val f = File(context.cacheDir, "tenant_photos/${tenant.cloudId}_profile.jpg")
-            if (f.exists() && f.length() > 0) f else null
+            val photosDir = File(context.cacheDir, "tenant_photos")
+            val matchingFile = photosDir.listFiles()?.firstOrNull { file ->
+                file.name.startsWith("${tenant.cloudId}_") && file.length() > 0
+            }
+            matchingFile ?: File(photosDir, "${tenant.cloudId}_profile.jpg").takeIf { it.exists() && it.length() > 0 }
         } else null
     }
 

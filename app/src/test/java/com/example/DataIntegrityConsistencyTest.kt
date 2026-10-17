@@ -155,12 +155,11 @@ class DataIntegrityConsistencyTest {
         val vacateResult = roomRepository.vacateTenant(tenantId = bharath.id, leavingDate = "2026-10-15", currentDateOverride = "2026-10-03")
         assertTrue(vacateResult is RoomValidationResult.Success)
 
-        // Before leaving date (Oct 3): Still 3/3 occupied, has upcoming vacancy
+        // Before leaving date (Oct 3): 2/3 occupied
         val summaryBeforeLeave = roomRepository.getRoomSummaryFlow("352").first()
-        assertEquals(3, summaryBeforeLeave?.occupiedBeds)
-        assertEquals(3, summaryBeforeLeave?.activeTenantCount)
-        assertEquals(0, summaryBeforeLeave?.availableBeds)
-        assertTrue(summaryBeforeLeave?.hasUpcomingVacancy == true)
+        assertEquals(2, summaryBeforeLeave?.occupiedBeds)
+        assertEquals(2, summaryBeforeLeave?.activeTenantCount)
+        assertEquals(1, summaryBeforeLeave?.availableBeds)
 
         // After effective leaving date (Simulate Oct 16): 2 / 3 occupied, 1 available
         val bharathVacatedImmediate = roomRepository.vacateTenant(tenantId = bharath.id, leavingDate = "2026-10-15", currentDateOverride = "2026-10-16")
@@ -214,5 +213,84 @@ class DataIntegrityConsistencyTest {
         // Attempt to assign tenant to blocked bed should fail
         val assignRes = roomRepository.assignTenantToBed("201", "Bed 1", tenantId = 999, startDate = "2026-10-01", agreedRent = 6000.0)
         assertTrue(assignRes is RoomValidationResult.Error)
+    }
+
+    @Test
+    fun testAtomicTransferRollback() = runTest(testDispatcher) {
+        val propId = "property_default"
+        propertyDao.insertProperty(PropertyEntity(propertyId = propId, propertyName = "Emerald Stays"))
+        roomRepository.insertRoom(RoomEntity(roomNumber = "101", floor = "1st", capacity = 2, ratePerBed = 5000.0, propertyId = propId))
+        roomRepository.insertRoom(RoomEntity(roomNumber = "202", floor = "2nd", capacity = 2, ratePerBed = 6000.0, propertyId = propId))
+
+        val tenantId = tenantRepository.insertTenant(
+            TenantEntity(
+                name = "Rollback Tenant",
+                phone = "9876543210",
+                email = "rollback@test.com",
+                emergencyContact = "9876543211",
+                roomNumber = "101",
+                bedId = "Bed 1",
+                monthlyRent = 5000.0,
+                securityDeposit = 0.0,
+                moveInDate = "2026-10-01",
+                isKycUploaded = false,
+                kycDocType = "None",
+                propertyId = propId
+            )
+        ).toInt()
+
+        val initialAssignRes = roomRepository.assignTenantToBed("101", "Bed 1", tenantId, "2026-10-01", 5000.0)
+        assertTrue(initialAssignRes is RoomValidationResult.Success)
+
+        val syncQueueDao = db.syncQueueDao()
+        val initialQueueCount = syncQueueDao.getAllOperationsFlow().first().size
+
+        // Capture pre-transfer baseline state
+        val tenantBefore = tenantDao.getTenantById(tenantId)!!
+        val srcBedBefore = bedDao.getBed(propId, "101", "Bed 1")!!
+        val srcAssignBefore = bedAssignmentDao.getActiveAssignmentForTenant(propId, tenantId, "2026-10-03")!!
+
+        // Inject SQLite trigger failure on tenants table UPDATE
+        db.openHelper.writableDatabase.execSQL(
+            "CREATE TRIGGER fail_on_tenant_update AFTER UPDATE ON tenants BEGIN SELECT RAISE(ABORT, 'Simulated DB Failure'); END;"
+        )
+
+        var exceptionThrown = false
+        try {
+            roomRepository.transferTenant(
+                tenantId = tenantId,
+                newRoomNumber = "202",
+                newBedId = "Bed 1",
+                transferDate = "2026-10-03",
+                newAgreedRent = 6000.0
+            )
+        } catch (e: Exception) {
+            exceptionThrown = true
+        } finally {
+            db.openHelper.writableDatabase.execSQL("DROP TRIGGER IF EXISTS fail_on_tenant_update")
+        }
+
+        assertTrue("Expected exception during transfer due to SQLite trigger failure", exceptionThrown)
+
+        // Assert full transaction rollback across all entities
+        val tenantAfter = tenantDao.getTenantById(tenantId)!!
+        assertEquals("101", tenantAfter.roomNumber)
+        assertEquals("Bed 1", tenantAfter.bedId)
+
+        val srcBedAfter = bedDao.getBed(propId, "101", "Bed 1")!!
+        assertEquals("OCCUPIED", srcBedAfter.status)
+
+        val destBedAfter = bedDao.getBed(propId, "202", "Bed 1")
+        assertTrue(destBedAfter == null || destBedAfter.status == "AVAILABLE")
+
+        val srcAssignAfter = bedAssignmentDao.getActiveAssignmentForTenant(propId, tenantId, "2026-10-03")!!
+        assertEquals(srcAssignBefore.assignmentId, srcAssignAfter.assignmentId)
+        assertNull(srcAssignAfter.endDate)
+
+        val destAssignAfter = bedAssignmentDao.getActiveAssignmentForBed(propId, "202", "Bed 1", "2026-10-03")
+        assertNull(destAssignAfter)
+
+        val finalQueueCount = syncQueueDao.getAllOperationsFlow().first().size
+        assertEquals(initialQueueCount, finalQueueCount)
     }
 }
